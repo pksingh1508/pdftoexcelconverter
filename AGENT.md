@@ -7,7 +7,8 @@ Accurately convert tables from PDFs into editable Excel workbooks, entirely in t
 ## Core principles
 
 1. **Accuracy > visual features.** Never sacrifice extraction correctness for cosmetics.
-2. **Preserve user data.** Never silently discard uncertain values — surface low-confidence tables for review.
+2. **Preserve user data.** Never silently discard uncertain values — surface low-confidence tables for review. NEVER move a value into a different column, NEVER glue it into a neighbor, NEVER drop it to "clean" the grid. An unnamed-but-correct column always beats a shifted sheet.
+3. **Row order is sacred.** Emission order must always be input (page, then top-to-bottom) order. Lock with tests.
 3. **PDF text extraction before OCR.** OCR is strictly a fallback for pages with too little usable text.
 4. **OCR only as fallback.** Never OCR a page that already yielded usable PDF.js text (unless user forces it).
 5. **Table detection is coordinate-based.** Group by Y (rows), cluster by X (columns). Never rely on spaces inside strings.
@@ -23,7 +24,7 @@ Accurately convert tables from PDFs into editable Excel workbooks, entirely in t
 - `config.js` — the ONLY place for magic numbers/tolerances.
 - `pdf-parser.js` — PDF.js I/O, top-left coordinate normalization, canvas render/release.
 - `ocr.js` — Tesseract worker lifecycle (shared, terminated after runs), word→item mapping, confidence filter.
-- `table-detector.js` — pure functions: `groupIntoRows` (Y grouping + fragment-touch join), `splitRowIntoCells` (gap-based word joining), `buildBlockColumns` + `mergeOverlappingColumns` (overlap alignment, duplicate fusion), `scoreTable` (fill/consistency/header-likeness), `detectTablesOnPage`, `filterMinorTables` (dominance + header tie-break), `mergeContinuedTables` (adjacent), `mergeSameHeaderTables` (exact heading match across ANY pages — one heading, all data below), `combineTables` (label-aligned single dataset). No DOM, no PDF.js.
+- `table-detector.js` — pure functions: `groupIntoRows` (Y grouping + fragment-touch join), `splitRowIntoCells` (gap-based word joining), `buildBlockColumns` + `mergeOverlappingColumns` (overlap alignment, duplicate fusion), `scoreTable` (fill/consistency/header-likeness), `detectTablesOnPage`, `filterMinorTables` (dominance + header tie-break), `mergeContinuedTables` (adjacent, LABEL-ALIGNED merge + positional remainder pairing), `mergeSameHeaderTables` (exact heading match across ANY pages — one heading, all data below), `mapColumnsToUnion` (labels-only mapping), `dropSparseColumns` (phantom-only: unnamed + 100% empty, nothing else), `combineTables` (longest-first union, gated positional pairing, majority-vote headers, page-order emission). No DOM, no PDF.js.
 - `table-cleaner.js` — whitespace normalization that preserves numbers/IDs/currencies.
 - `excel-exporter.js` — xlsx-js-style writer (NOT plain SheetJS: community drops styles on write). `buildCombinedWorkbook` = ONE sheet from the combined grid. Heading rows (row 0 + repeats) MUST stay bold on yellow; EVERY cell MUST keep thin black borders on all sides. Safe type coercion (leading-zero IDs stay text).
 - `ui.js` — DOM only, `textContent`/`value` rendering (never `innerHTML` for extracted data).

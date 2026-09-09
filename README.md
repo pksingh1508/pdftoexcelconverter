@@ -51,6 +51,13 @@ TABLE_GAP_MULTIPLIER: 2.2, MIN_OCR_CONFIDENCE: 40, …
 
 Set `DEBUG: true` to log text items and OCR words to the console while tuning.
 
+## Data-integrity rules (production)
+
+1. **Values are never moved across columns.** Merges and stacking align by header label; leftovers extend the sheet visibly instead of squeezing into wrong slots.
+2. **Values are never deleted or glued into neighbors.** Sparse columns survive with their values in place (an unnamed column is honest; a shifted column is corruption).
+3. **Row order is sacred.** The sheet reads top-to-bottom exactly like the PDF (page order, then top-to-bottom within each page) — verified by tests.
+4. **Headers are majority-voted.** A one-page text-layer glitch (e.g. `I-JM` for `UM`) can never rename a column the rest of the document agrees on.
+
 ## How Excel generation works
 
 - One workbook, **one worksheet** (`combineTables` merges every page/table into a single grid).
