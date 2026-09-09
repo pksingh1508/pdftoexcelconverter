@@ -17,6 +17,7 @@ import {
 import {
   detectTablesOnPage,
   mergeContinuedTables,
+  mergeSameHeaderTables,
   combineTables,
   buildFallbackTable,
 } from './table-detector.js';
@@ -334,6 +335,9 @@ async function convert(forceOcr) {
     await nextFrame();
 
     tables = mergeContinuedTables(tables);
+    // Merge same-heading tables wherever they repeat, so the sheet holds
+    // ONE heading at the top and all data below it.
+    tables = mergeSameHeaderTables(tables);
     // Re-title after merge so names stay sequential.
     tables.forEach((t, i) => {
       t.title = `Table ${i + 1} - Page ${t.pageNumbers.join(',')}`;

@@ -20,7 +20,7 @@ Extract tables from PDF documents and download them as clean, editable `.xlsx` s
 |---|---|---|
 | PDF reading + text positions + page rendering | [PDF.js 3.11.174](https://mozilla.github.io/pdf.js/) (cdnjs) | `getTextContent()` → `{text,x,y,width,height,page}` normalized to top-left origin |
 | OCR fallback | [Tesseract.js v5](https://tesseract.projectnaptha.com/) (jsDelivr) | Word boxes → same `{text,x,y,…}` shape; shared worker, terminated after run |
-| Excel generation | [SheetJS 0.18.5](https://sheetjs.com/) (cdnjs) | `aoa_to_sheet` per table, `!cols` widths, `writeFile` download |
+| Export (styled) | [xlsx-js-style 1.2.0](https://github.com/gitbrent/xlsx-js-style) (jsDelivr, SheetJS API-compatible) | Bold + yellow headings, thin borders on all cells (`buildCombinedWorkbook`) |
 | App code | Vanilla HTML5 + CSS3 + ES modules | No React / Vue / backend |
 
 ## How PDF extraction works
@@ -55,6 +55,8 @@ Set `DEBUG: true` to log text items and OCR words to the console while tuning.
 
 - One workbook, **one worksheet** (`combineTables` merges every page/table into a single grid).
 - Tables that continue across pages (same shape + repeated header) merge seamlessly — one 32-page packing note becomes one ~800-row sheet with a single header.
+- Tables with the **exact same heading repeating anywhere** in the document (`mergeSameHeaderTables`, even non-consecutive pages) also merge: one heading at the top, all data below.
+- Sheet styling: heading row(s) are **bold on a yellow background**, and **every cell gets thin black borders on all four sides**. (Plain SheetJS community cannot write styles — they are silently dropped — so the app uses the API-compatible `xlsx-js-style` fork as its writer.)
 - Sections with genuinely different widths are stacked below with a blank separator, **columns aligned by header label** (QTY stays under QTY even when a middle column like UM is absent on some pages); missing header labels are adopted from later pages.
 - Sheet name = input file name (`SIEMENS ENERGY 993 A2.pdf` → sheet `SIEMENS ENERGY 993 A2`, sanitized to Excel's 31-char / no-`[]:*?/\` rules).
 - `toCellValue()` converts only unambiguous plain numbers (and simple `$`-prefixed amounts) to numeric cells; leading-zero IDs (`001245`), codes, percents-as-text, and dates stay text so values never silently change.

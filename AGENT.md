@@ -23,9 +23,9 @@ Accurately convert tables from PDFs into editable Excel workbooks, entirely in t
 - `config.js` — the ONLY place for magic numbers/tolerances.
 - `pdf-parser.js` — PDF.js I/O, top-left coordinate normalization, canvas render/release.
 - `ocr.js` — Tesseract worker lifecycle (shared, terminated after runs), word→item mapping, confidence filter.
-- `table-detector.js` — pure functions: `groupIntoRows` (Y grouping + fragment-touch join), `splitRowIntoCells` (gap-based word joining), `buildBlockColumns` + `mergeOverlappingColumns` (overlap alignment, duplicate fusion), `scoreTable` (fill/consistency/header-likeness), `detectTablesOnPage`, `filterMinorTables` (dominance + header tie-break), `mergeContinuedTables`, `combineTables` (label-aligned single dataset). No DOM, no PDF.js.
+- `table-detector.js` — pure functions: `groupIntoRows` (Y grouping + fragment-touch join), `splitRowIntoCells` (gap-based word joining), `buildBlockColumns` + `mergeOverlappingColumns` (overlap alignment, duplicate fusion), `scoreTable` (fill/consistency/header-likeness), `detectTablesOnPage`, `filterMinorTables` (dominance + header tie-break), `mergeContinuedTables` (adjacent), `mergeSameHeaderTables` (exact heading match across ANY pages — one heading, all data below), `combineTables` (label-aligned single dataset). No DOM, no PDF.js.
 - `table-cleaner.js` — whitespace normalization that preserves numbers/IDs/currencies.
-- `excel-exporter.js` — SheetJS only. `buildCombinedWorkbook` = ONE sheet from the combined grid. Safe type coercion (leading-zero IDs stay text).
+- `excel-exporter.js` — xlsx-js-style writer (NOT plain SheetJS: community drops styles on write). `buildCombinedWorkbook` = ONE sheet from the combined grid. Heading rows (row 0 + repeats) MUST stay bold on yellow; EVERY cell MUST keep thin black borders on all sides. Safe type coercion (leading-zero IDs stay text).
 - `ui.js` — DOM only, `textContent`/`value` rendering (never `innerHTML` for extracted data).
 - `app.js` — orchestration, state, progress, cancel, errors. No detection math.
 

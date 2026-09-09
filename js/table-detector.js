@@ -742,6 +742,59 @@ function headersEqual(a, b) {
 }
 
 /**
+ * Merge ALL tables with the exact same heading, wherever they appear.
+ * mergeContinuedTables only joins adjacent continuations; a table that
+ * repeats on non-consecutive pages (e.g. pages 1, 5 and 9 with other
+ * content between) would otherwise export with its heading repeated.
+ * After this pass the sheet holds ONE heading at the top and all data
+ * rows below it. Exact normalized match only — near-matches stay separate.
+ * @param {Array} tables - in page order
+ * @returns {Array} merged tables with updated ids
+ */
+export function mergeSameHeaderTables(tables) {
+  if (tables.length < 2) return tables;
+  const keyOf = (t) => {
+    if (!t.rows || !t.rows.length) return null;
+    const cells = t.rows[0].map((c) =>
+      String(c || '').trim().replace(/\s+/g, ' ').toLowerCase()
+    );
+    return t.rows[0].length + '|' + JSON.stringify(cells);
+  };
+  const claimed = new Set();
+  const out = [];
+  tables.forEach((t, i) => {
+    if (claimed.has(i)) return;
+    const key = keyOf(t);
+    if (key === null) {
+      out.push(t);
+      return;
+    }
+    claimed.add(i);
+    let rows = t.rows.map((r) => r.slice());
+    let pages = [...(t.pageNumbers || [])];
+    let confSum = t.confidence || 0;
+    let confN = 1;
+    tables.forEach((u, j) => {
+      if (claimed.has(j) || keyOf(u) !== key) return;
+      claimed.add(j);
+      rows.push(...u.rows.slice(1).map((r) => r.slice()));
+      for (const p of u.pageNumbers || []) if (!pages.includes(p)) pages.push(p);
+      confSum += u.confidence || 0;
+      confN++;
+    });
+    pages.sort((a, b) => a - b);
+    out.push({
+      ...t,
+      rows,
+      pageNumbers: pages,
+      confidence: round2(confSum / confN),
+      sameHeaderMerged: confN > 1,
+    });
+  });
+  return out.map((t, i) => ({ ...t, id: `table-${i + 1}` }));
+}
+
+/**
  * Combine all detected tables into ONE dataset for the single-sheet export.
  * Continuations are already merged; remaining distinct tables (different
  * sections, e.g. a page whose UM column is genuinely absent) are stacked

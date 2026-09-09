@@ -182,7 +182,7 @@
   <footer class="footer">
     <div class="container footer-inner">
       <span>PDF to Excel — client-side converter</span>
-      <span class="muted small">Text PDFs via PDF.js • Scans via Tesseract.js OCR • Export via SheetJS</span>
+      <span class="muted small">Text PDFs via PDF.js • Scans via Tesseract.js OCR • Styled Excel export</span>
     </div>
   </footer>
 
@@ -191,7 +191,10 @@
 
   <!-- Vendor libraries (global builds, pinned) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <!-- xlsx-js-style: SheetJS API-compatible fork that also WRITES cell
+       styles (bold/fill/borders). Plain SheetJS community silently drops
+       styles on write, so this fork is required for formatted output. -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.0.5/dist/tesseract.min.js"></script>
   <script type="module" src="./js/app.js?v=2"></script>
 </body>
