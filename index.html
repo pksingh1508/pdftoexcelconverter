@@ -1,11 +1,199 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PFT to Excel</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Extract tables from PDF documents and convert them into clean, editable Excel spreadsheets. 100% private — processed locally in your browser." />
+  <title>PDF to Excel — Convert PDF Tables to Excel</title>
+  <link rel="stylesheet" href="./css/styles.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2316a34a'/%3E%3Ctext x='16' y='22' font-family='Arial,sans-serif' font-size='16' font-weight='bold' fill='white' text-anchor='middle'%3Ex%3C/text%3E%3C/svg%3E" />
 </head>
 <body>
-    h1>PFT to Excel</h1>
+  <a class="skip-link" href="#main">Skip to main content</a>
+
+  <header class="navbar" role="banner">
+    <div class="container navbar-inner">
+      <a href="#" class="brand" aria-label="PDF to Excel home">
+        <span class="brand-icon" aria-hidden="true">
+          <svg width="28" height="28" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect width="32" height="32" rx="7" fill="#16a34a"/>
+            <path d="M10 11h7l4 4v8H10v-12z" fill="white" opacity="0.95"/>
+            <path d="M17 11v4h4" fill="#bbf7d0"/>
+            <path d="M12.5 17.5h7M12.5 20h7M12.5 22.5h4.5" stroke="#16a34a" stroke-width="1.2" stroke-linecap="round"/>
+          </svg>
+        </span>
+        <span class="brand-name">PDF to Excel</span>
+      </a>
+      <nav class="nav-links" aria-label="Primary">
+        <a href="#how-it-works">How It Works</a>
+        <a href="#privacy">Privacy</a>
+        <a href="https://github.com/" target="_blank" rel="noopener">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main">
+    <!-- HERO -->
+    <section class="hero">
+      <div class="container hero-inner">
+        <div class="badge" role="status">
+          <span class="dot" aria-hidden="true"></span>
+          100% private — runs in your browser
+        </div>
+        <h1>Convert PDF Tables to Excel</h1>
+        <p class="subheading">Extract tables from PDF documents and convert them into clean, editable Excel spreadsheets.</p>
+
+        <!-- UPLOAD CARD -->
+        <div class="card upload-card" id="uploadCard">
+          <div
+            id="dropzone"
+            class="dropzone"
+            role="button"
+            tabindex="0"
+            aria-label="Upload a PDF file. Press Enter to browse files."
+            aria-describedby="dropzoneHelp"
+          >
+            <input type="file" id="fileInput" accept="application/pdf,.pdf" hidden aria-label="Choose PDF file" />
+            <div class="dropzone-icon" aria-hidden="true">
+              <svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect x="8" y="4" width="32" height="40" rx="4" fill="#FEF2F2" stroke="#FECACA" stroke-width="1.5"/>
+                <text x="24" y="21" text-anchor="middle" font-family="Arial,sans-serif" font-size="9" font-weight="bold" fill="#DC2626">PDF</text>
+                <path d="M16 29h16M16 33h16M16 37h10" stroke="#FCA5A5" stroke-width="1.6" stroke-linecap="round"/>
+              </svg>
+            </div>
+            <p class="dropzone-title" id="dropzoneTitle">Drop your PDF here</p>
+            <p class="dropzone-sub">or click to browse</p>
+            <button type="button" class="btn btn-secondary" id="chooseBtn">Choose PDF</button>
+            <p class="dropzone-help" id="dropzoneHelp">PDF files only • Max 50 MB • Your PDF stays on your device.</p>
+          </div>
+
+          <!-- FILE SELECTED STATE -->
+          <div id="fileState" class="file-state hidden">
+            <div class="file-row">
+              <div class="file-icon" aria-hidden="true">
+                <svg width="36" height="36" viewBox="0 0 36 36" fill="none"><rect width="36" height="36" rx="8" fill="#DCFCE7"/><text x="18" y="23" text-anchor="middle" font-size="10" font-weight="bold" fill="#15803d" font-family="Arial">PDF</text></svg>
+              </div>
+              <div class="file-meta">
+                <p class="file-name" id="fileName">document.pdf</p>
+                <p class="file-details" id="fileDetails">—</p>
+              </div>
+              <button type="button" class="btn btn-ghost" id="removeFileBtn" aria-label="Remove selected file">Remove</button>
+            </div>
+            <div class="file-actions">
+              <button type="button" class="btn btn-primary btn-large" id="convertBtn">
+                Convert to Excel
+              </button>
+              <p class="privacy-note">
+                <span aria-hidden="true">🔒</span>
+                Your document is processed locally in your browser and is not uploaded to our servers.
+              </p>
+            </div>
+            <p class="error-text hidden" id="fileError" role="alert"></p>
+          </div>
+
+          <!-- PROCESSING STATE -->
+          <div id="processingState" class="processing-state hidden" aria-live="polite">
+            <div class="spinner" aria-hidden="true"></div>
+            <h2 id="processingTitle">Analyzing PDF…</h2>
+            <p class="processing-stage" id="processingStage">Loading PDF</p>
+            <p class="processing-page" id="processingPage"></p>
+            <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="progressBar" aria-label="Conversion progress">
+              <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+            </div>
+            <p class="progress-pct" id="progressPct">0%</p>
+            <p class="ocr-notice hidden" id="ocrNotice" role="status">Scanned document detected. OCR processing may take longer.</p>
+            <button type="button" class="btn btn-ghost" id="cancelBtn">Cancel</button>
+          </div>
+        </div>
+
+        <!-- RESULT / PREVIEW -->
+        <div class="card result-card hidden" id="resultCard">
+          <div class="result-header">
+            <div>
+              <h2 id="resultTitle">Tables detected</h2>
+              <p class="muted" id="resultSubtitle"></p>
+            </div>
+            <div class="result-actions">
+              <button type="button" class="btn btn-primary" id="downloadBtn">Download Excel</button>
+              <button type="button" class="btn btn-secondary" id="convertAnotherBtn">Convert Another PDF</button>
+            </div>
+          </div>
+
+          <div id="noTablesState" class="hidden">
+            <div class="empty-state">
+              <p class="empty-title">No tables were confidently detected in this PDF.</p>
+              <p class="muted">You can still review the extracted text below, force OCR, or try another file.</p>
+              <div class="empty-actions">
+                <button type="button" class="btn btn-secondary" id="forceOcrBtn">Try OCR on all pages</button>
+                <button type="button" class="btn btn-ghost" id="showRawTextBtn">Extract page text</button>
+              </div>
+              <div id="rawTextWrap" class="hidden">
+                <h3>Extracted page text</h3>
+                <pre id="rawText" class="raw-text"></pre>
+              </div>
+            </div>
+          </div>
+
+          <div id="tablesWrap">
+            <div class="tabs" role="tablist" aria-label="Detected tables" id="tableTabs"></div>
+            <div class="table-toolbar">
+              <span class="confidence-pill" id="confidencePill"></span>
+              <span class="muted small" id="tableMeta"></span>
+              <span class="spacer"></span>
+              <button type="button" class="btn btn-ghost btn-small" id="addRowBtn">+ Row</button>
+              <button type="button" class="btn btn-ghost btn-small" id="addColBtn">+ Column</button>
+              <button type="button" class="btn btn-ghost btn-small btn-danger" id="removeTableBtn">Remove table</button>
+            </div>
+            <div class="table-scroll">
+              <table id="previewTable" aria-label="Extracted table preview"></table>
+            </div>
+            <p class="muted small preview-hint">Click any cell to edit. Edits are included in the Excel download. <button type="button" class="link-btn" id="showAllRowsBtn">Show all rows</button></p>
+          </div>
+          <p class="error-text hidden" id="exportError" role="alert"></p>
+        </div>
+      </div>
+    </section>
+
+    <!-- HOW IT WORKS -->
+    <section class="info-section" id="how-it-works">
+      <div class="container">
+        <h2>How it works</h2>
+        <div class="steps">
+          <div class="step"><span class="step-num">1</span><h3>Upload PDF</h3><p>Drag &amp; drop or browse. Files never leave your device.</p></div>
+          <div class="step"><span class="step-num">2</span><h3>Detect tables</h3><p>Text positions are analyzed to rebuild rows &amp; columns. Scanned pages fall back to on-device OCR.</p></div>
+          <div class="step"><span class="step-num">3</span><h3>Review &amp; download</h3><p>Edit cells in the preview, then export a clean <code>.xlsx</code> workbook.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- PRIVACY -->
+    <section class="info-section info-alt" id="privacy">
+      <div class="container">
+        <h2>Private by design</h2>
+        <p>Your document is processed locally in your browser and is not uploaded to our servers. No account, no database, no tracking of file contents. Close the tab and everything is gone.</p>
+        <ul class="privacy-list">
+          <li>✓ No uploads — PDF.js, Tesseract.js and SheetJS all run client-side</li>
+          <li>✓ No storage — files live only in memory</li>
+          <li>✓ Works offline after first load (except CDN-cached OCR models)</li>
+        </ul>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="container footer-inner">
+      <span>PDF to Excel — client-side converter</span>
+      <span class="muted small">Text PDFs via PDF.js • Scans via Tesseract.js OCR • Export via SheetJS</span>
+    </div>
+  </footer>
+
+  <div id="toast" class="toast hidden" role="alert" aria-live="assertive"></div>
+  <canvas id="ocrCanvas" class="hidden" aria-hidden="true"></canvas>
+
+  <!-- Vendor libraries (global builds, pinned) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.0.5/dist/tesseract.min.js"></script>
+  <script type="module" src="./js/app.js"></script>
 </body>
 </html>
