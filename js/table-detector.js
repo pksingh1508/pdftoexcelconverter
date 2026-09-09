@@ -612,48 +612,30 @@ function avgRowLen(row) {
 }
 
 /**
- * Drop artifact columns: unnamed in the header row AND filled in fewer
- * than minFill of rows. Their stray content (text splinters like a lone
- * "VLV" that split off its LINE cell) is appended to the nearest kept
- * neighbor (left preferred) so no data is lost and remaining columns keep
- * their positions. Named columns (even empty ones like TAG) are kept —
- * they are real table structure.
+ * Drop phantom columns: unnamed in the header row AND completely empty.
+ * Nothing else is ever removed or merged: a sparse-but-real column (e.g. a
+ * UM column whose header text is missing from the PDF layer and which holds
+ * values on only a few rows) MUST survive with its values exactly in place.
+ * Gluing its values into a neighboring column would shift every column to
+ * its right and corrupt the whole sheet — in a production system a visible
+ * unnamed column is always preferable to silently moved data.
+ * Named columns (even fully empty ones like TAG) are always kept — they are
+ * real table structure.
  * @param {string[][]} grid - uniform-width rows, first row is the header
- * @param {number} [minFill]
  * @returns {string[][]}
  */
-export function dropSparseColumns(grid, minFill = 0.05) {
+export function dropSparseColumns(grid) {
   if (!grid.length || grid[0].length < 2) return grid;
   const header = grid[0];
-  const n = grid.length;
   const keep = header.map((h, c) => {
     if (String(h || '').trim() !== '') return true;
-    let filled = 0;
-    for (const r of grid) if (String(r[c] || '').trim() !== '') filled++;
-    return filled / n >= minFill;
+    for (const r of grid) {
+      if (String(r[c] || '').trim() !== '') return true;
+    }
+    return false;
   });
   if (keep.every(Boolean)) return grid;
-  const keptIdx = keep.map((k, i) => (k ? i : -1)).filter((i) => i >= 0);
-  const nearestKeptPos = (c) => {
-    let left = -1;
-    for (const k of keptIdx) {
-      if (k < c) left = k;
-      else break;
-    }
-    if (left >= 0) return keptIdx.indexOf(left);
-    return 0; // no kept column to the left: merge into the first kept one
-  };
-  return grid.map((row) => {
-    const out = row.filter((_, c) => keep[c]);
-    row.forEach((val, c) => {
-      if (keep[c]) return;
-      const v = String(val || '').trim();
-      if (!v) return;
-      const pos = nearestKeptPos(c);
-      out[pos] = out[pos] ? `${out[pos]} ${v}` : v;
-    });
-    return out;
-  });
+  return grid.map((row) => row.filter((_, c) => keep[c]));
 }
 
 /**
