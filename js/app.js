@@ -164,6 +164,17 @@ async function init() {
     for (const row of t.rows) row.push('');
     refreshPreview(true);
   });
+  els.delColBtn.addEventListener('click', () => {
+    const t = state.tables[state.activeTable];
+    if (!t || !t.rows.length) return;
+    const width = Math.max(...t.rows.map((r) => r.length));
+    if (width <= 1) {
+      toast('A table needs at least one column.');
+      return;
+    }
+    for (const row of t.rows) row.splice(width - 1, 1);
+    refreshPreview(true);
+  });
   els.removeTableBtn.addEventListener('click', () => {
     if (!state.tables.length) return;
     state.tables.splice(state.activeTable, 1);

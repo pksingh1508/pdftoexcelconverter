@@ -17,7 +17,7 @@ export function cacheElements() {
     'progressBar', 'progressFill', 'progressPct', 'ocrNotice', 'cancelBtn',
     'resultCard', 'resultTitle', 'resultSubtitle', 'tablesWrap', 'tableTabs',
     'confidencePill', 'tableMeta', 'previewTable', 'showAllRowsBtn',
-    'addRowBtn', 'addColBtn', 'removeTableBtn',
+    'addRowBtn', 'addColBtn', 'delColBtn', 'removeTableBtn',
     'downloadBtn', 'convertAnotherBtn',
     'noTablesState', 'forceOcrBtn', 'showRawTextBtn', 'rawTextWrap', 'rawText',
     'exportError', 'toast', 'ocrCanvas',
