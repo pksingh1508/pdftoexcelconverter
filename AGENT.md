@@ -15,7 +15,7 @@ Accurately convert tables from PDFs into editable Excel workbooks, entirely in t
 7. **No backend without a strong reason.** The app must deploy as static files (Vercel / Netlify / Pages).
 8. **No React/frameworks.** Vanilla HTML + CSS + ES modules only.
 9. **Keep modules small and maintainable.** `pdf-parser ≠ ocr ≠ table-detector ≠ excel-exporter ≠ ui`. Both extractors must emit the same `{text,x,y,width,height,page,source}` shape so the detector never cares about origin.
-10. **Edited preview data is what gets exported.** Every edit path must mutate `table.rows` before `buildWorkbook`.
+10. **Edited preview data is what gets exported.** The preview edits `state.combined.rows` directly — the exact grid `buildCombinedWorkbook` exports. Single source of truth, no divergence.
 11. **Test extraction changes against multiple PDF layouts** (simple, financial, bank statement, invoice, multi-page, multi-table, scanned, no-table, prose+table, blank pages, corrupted, password-protected, missing cells, currency/percent, multi-line).
 
 ## Module boundaries
@@ -23,9 +23,9 @@ Accurately convert tables from PDFs into editable Excel workbooks, entirely in t
 - `config.js` — the ONLY place for magic numbers/tolerances.
 - `pdf-parser.js` — PDF.js I/O, top-left coordinate normalization, canvas render/release.
 - `ocr.js` — Tesseract worker lifecycle (shared, terminated after runs), word→item mapping, confidence filter.
-- `table-detector.js` — pure functions: `groupIntoRows`, `clusterXPositions`, `mapRowsToColumns`, `scoreTable`, `detectTablesOnPage`, `mergeContinuedTables`, `buildFallbackTable`. No DOM, no PDF.js.
+- `table-detector.js` — pure functions: `groupIntoRows` (Y grouping + fragment-touch join), `splitRowIntoCells` (gap-based word joining), `buildBlockColumns` + `mergeOverlappingColumns` (overlap alignment, duplicate fusion), `scoreTable` (fill/consistency/header-likeness), `detectTablesOnPage`, `filterMinorTables` (dominance + header tie-break), `mergeContinuedTables`, `combineTables` (label-aligned single dataset). No DOM, no PDF.js.
 - `table-cleaner.js` — whitespace normalization that preserves numbers/IDs/currencies.
-- `excel-exporter.js` — SheetJS only. Safe type coercion (leading-zero IDs stay text).
+- `excel-exporter.js` — SheetJS only. `buildCombinedWorkbook` = ONE sheet from the combined grid. Safe type coercion (leading-zero IDs stay text).
 - `ui.js` — DOM only, `textContent`/`value` rendering (never `innerHTML` for extracted data).
 - `app.js` — orchestration, state, progress, cancel, errors. No detection math.
 

@@ -60,6 +60,44 @@ export function toCellValue(raw) {
 }
 
 /**
+ * Build a single-sheet workbook from the COMBINED dataset (all pages and
+ * tables merged into one grid). This is the only export path: one download
+ * button, one .xlsx file, one worksheet with everything.
+ * @param {string[][]} rows - combined grid, first row is the header
+ * @param {string} sheetName - sanitized automatically
+ * @returns {object} workbook
+ */
+export function buildCombinedWorkbook(rows, sheetName = 'All Data') {
+  const XLSX = getXLSX();
+  const wb = XLSX.utils.book_new();
+  const name = sanitizeSheetName(sheetName);
+  const aoa = (rows && rows.length ? rows : [['(empty)']]).map((row) =>
+    row.map(toCellValue)
+  );
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+
+  const width = aoa[0] ? aoa[0].length : 1;
+  ws['!cols'] = Array.from({ length: width }, (_, c) => {
+    let longest = 10;
+    for (const row of aoa) {
+      const v = row[c];
+      const len = String(v ?? '').length;
+      if (len > longest) longest = len;
+    }
+    return { wch: Math.min(Math.max(longest + 2, 10), 50) };
+  });
+
+  try {
+    ws['!freeze'] = 'A2';
+  } catch {
+    /* styling is best-effort */
+  }
+
+  XLSX.utils.book_append_sheet(wb, ws, name);
+  return wb;
+}
+
+/**
  * Build a SheetJS workbook from detected tables.
  * @param {Array<{id:string, pageNumbers:number[], rows:string[][], title?:string}>} tables
  * @param {string} [baseName]

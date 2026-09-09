@@ -34,6 +34,30 @@ export const CONFIG = {
   // Table splitting: a vertical gap larger than median * this ends a table.
   TABLE_GAP_MULTIPLIER: 2.2,
 
+  // Cell segmentation: within one row, consecutive fragments separated by a
+  // gap larger than this threshold start a NEW cell (new column); smaller
+  // gaps are word spaces inside the same cell. Measured on real packing-note
+  // PDFs: word spaces are ~1.5-6 units, column gutters are ~12+ units.
+  // The threshold adapts per row: median(small gaps) * factor, clamped.
+  WORD_GAP_FACTOR: 2.5,
+  MIN_CELL_GAP: 8,
+  MAX_CELL_GAP: 14,
+  SMALL_GAP_CEILING: 20,
+
+  // Column alignment: a cell joins the column with the largest
+  // (overlap / min(cellWidth, colWidth)) when that ratio >= this.
+  OVERLAP_THRESHOLD: 0.3,
+
+  // Dominance filter: when a page's best table scores >= this, a sibling
+  // that is BOTH weaker by SCORE_MARGIN and smaller than ROW_FRACTION of
+  // the best table's rows is dropped (letterhead blocks, sold-to boxes).
+  // Tables below ABS_MIN_SCORE are always dropped. Pages without a strong
+  // table keep everything.
+  BEST_TABLE_MIN_SCORE: 0.8,
+  TABLE_SCORE_MARGIN: 0.08,
+  TABLE_ROW_FRACTION: 0.5,
+  ABS_MIN_TABLE_SCORE: 0.55,
+
   // Preview perf: render at most this many rows initially per table.
   PREVIEW_ROW_LIMIT: 150,
 

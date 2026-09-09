@@ -41,6 +41,15 @@ class OcrEngine {
           }
         },
       });
+      // PSM 6 (uniform block of text): materially better for full-page
+      // tables than the default fully-automatic segmentation.
+      try {
+        if (this.worker.setParameters) {
+          await this.worker.setParameters({ tessedit_pageseg_mode: '6' });
+        }
+      } catch {
+        /* older builds ignore this; default segmentation still works */
+      }
       return this.worker;
     })();
     return this._initializing;

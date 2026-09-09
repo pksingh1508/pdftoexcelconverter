@@ -7,9 +7,9 @@ Extract tables from PDF documents and download them as clean, editable `.xlsx` s
 - 📄 Drag & drop or click-to-browse PDF upload (max 50 MB, validated)
 - 🔍 Coordinate-based table detection (rows from Y positions, columns from X clustering)
 - 📷 Scanned-PDF fallback: page rendered to canvas → Tesseract.js OCR → same table pipeline
-- 👀 Tabbed HTML preview with confidence badges (High / Medium / Low)
-- ✏️ Editable preview — click any cell, add/delete rows & columns, remove tables
-- 📊 Multi-table export — one worksheet per table, sensible sheet names, auto column widths
+- 👀 Single combined preview with confidence badge — all pages merged into one grid
+- ✏️ Editable preview — click any cell, add/delete rows & columns
+- 📊 One download button → one `.xlsx` file → one worksheet with ALL data
 - 🔒 Privacy-first: no backend, no database, no auth, no uploads
 - 📱 Responsive + accessible (keyboard navigation, ARIA, focus styles)
 - ⏹️ Cancellable long runs with live progress (page X of Y, OCR %)
@@ -26,11 +26,11 @@ Extract tables from PDF documents and download them as clean, editable `.xlsx` s
 ## How PDF extraction works
 
 1. `pdf-parser.js` loads the PDF with PDF.js and, per page, reads `page.getTextContent()`.
-2. Each fragment's `transform[4]/transform[5]` gives X/Y; Y is flipped to a top-left origin (`pageHeight − y`) so PDF text and OCR boxes share one coordinate system.
-3. `table-detector.js` groups fragments into rows when vertical centers differ by ≤ `ROW_Y_TOLERANCE` (adaptive to median font height), sorts left→right by X.
-4. Column centers are inferred by clustering all X starts (`clusterXPositions` with `COLUMN_X_TOLERANCE`); every fragment maps to its nearest column and same-cell fragments concatenate.
-5. Wrapped lines (single-cell rows close to the previous row) merge into the row above; consecutive ≥2-cell rows form table blocks, split by large vertical gaps (`TABLE_GAP_MULTIPLIER`) or prose-like lines.
-6. Each block is scored (fill rate, row-shape consistency, multi-column density, size) → confidence label. Cross-page tables with identical repeated headers merge (`mergeContinuedTables`).
+2. Each fragment's `transform[4]/transform[5]` gives X/Y; Y is flipped to a top-left origin (`pageHeight − y`) so PDF text and OCR boxes share one coordinate system. Rows group by Y proximity, with an extra rule that joins tiny fragments (dashes, split-off words like "VLV") sitting 1–3 units off their text line — otherwise they become phantom rows.
+3. `table-detector.js` splits each row into **cells by gaps**: words separated by small gaps join one cell (`1000 - SKID PIPING, PIPING VLV`); only large gutters (adaptive per-row threshold) start new columns. This is what keeps multi-word cells intact.
+4. Column centers are inferred **per block** by interval overlap, then duplicate/contained intervals (header remnants, text splinters) are fused back into their logical column. A column that only appears in data rows (e.g. UM values with no text header) still gets its own column.
+5. Wrapped lines (single-fragment rows overlapping the cell above) fold into the row above; consecutive multi-cell rows form table blocks, split by large vertical gaps, sustained column-structure changes, or header-row boundaries. Each block is scored (fill rate, row-shape consistency, multi-column density, header-likeness, size) → confidence label.
+6. Letterhead/address fragments are excluded by a dominance filter (weak + small next to a strong main table) and a header tie-break — verified: a 32-page packing note yields zero letterhead rows.
 7. `table-cleaner.js` trims/collapses whitespace while preserving numbers, currencies, signs, and leading-zero IDs.
 
 ## How OCR fallback works
@@ -53,7 +53,10 @@ Set `DEBUG: true` to log text items and OCR words to the console while tuning.
 
 ## How Excel generation works
 
-- One workbook, one worksheet per table (`Table N - Page P`, sanitized to Excel's 31-char / no-`[]:*?/\` rules, de-duplicated).
+- One workbook, **one worksheet** (`combineTables` merges every page/table into a single grid).
+- Tables that continue across pages (same shape + repeated header) merge seamlessly — one 32-page packing note becomes one ~800-row sheet with a single header.
+- Sections with genuinely different widths are stacked below with a blank separator, **columns aligned by header label** (QTY stays under QTY even when a middle column like UM is absent on some pages); missing header labels are adopted from later pages.
+- Sheet name = input file name (`SIEMENS ENERGY 993 A2.pdf` → sheet `SIEMENS ENERGY 993 A2`, sanitized to Excel's 31-char / no-`[]:*?/\` rules).
 - `toCellValue()` converts only unambiguous plain numbers (and simple `$`-prefixed amounts) to numeric cells; leading-zero IDs (`001245`), codes, percents-as-text, and dates stay text so values never silently change.
 - Column widths auto-size (`longest + 2`, clamped 10–50), header row frozen (`A2`, best-effort).
 - Filename mirrors input: `bank-statement.pdf` → `bank-statement.xlsx`. Export always uses the **edited** preview data.

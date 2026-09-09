@@ -17,11 +17,12 @@ import {
 import {
   detectTablesOnPage,
   mergeContinuedTables,
+  combineTables,
   buildFallbackTable,
 } from './table-detector.js';
 import { cleanTable, dropEmptyTables } from './table-cleaner.js';
 import { ocrCanvas, terminateOcrEngine } from './ocr.js';
-import { buildWorkbook, downloadWorkbook, outputFilename } from './excel-exporter.js';
+import { buildCombinedWorkbook, downloadWorkbook, outputFilename } from './excel-exporter.js';
 import {
   cacheElements,
   getEls,
@@ -32,12 +33,11 @@ import {
   showView,
   showResult,
   setFileError,
-  renderTabs,
   renderPreview,
-  setConfidence,
+  setCombinedMeta,
 } from './ui.js';
 
-/** @type {{file:File|null, pdf:object|null, pageCount:number, processing:boolean, cancelled:boolean, forceOcr:boolean, tables:Array, activeTable:number, showAllRows:boolean, dirty:boolean}} */
+/** @type {{file:File|null, pdf:object|null, pageCount:number, processing:boolean, cancelled:boolean, forceOcr:boolean, tables:Array, combined:{rows:Array,header:Array,sources:Array,pageCount:number}|null, showAllRows:boolean, dirty:boolean}} */
 const state = {
   file: null,
   pdf: null,
@@ -46,7 +46,7 @@ const state = {
   cancelled: false,
   forceOcr: false,
   tables: [],
-  activeTable: 0,
+  combined: null,
   showAllRows: false,
   dirty: false,
 };
@@ -148,42 +148,35 @@ async function init() {
   els.showRawTextBtn.addEventListener('click', toggleRawText);
   els.showAllRowsBtn.addEventListener('click', () => {
     state.showAllRows = !state.showAllRows;
-    renderActiveTable();
+    renderCombined();
   });
   els.addRowBtn.addEventListener('click', () => {
-    const t = state.tables[state.activeTable];
-    if (!t) return;
-    const cols = t.rows[0] ? t.rows[0].length : 1;
-    t.rows.push(new Array(cols).fill(''));
+    const c = state.combined;
+    if (!c || !c.rows.length) return;
+    const cols = c.rows[0] ? c.rows[0].length : 1;
+    c.rows.push(new Array(cols).fill(''));
     state.showAllRows = true;
-    refreshPreview(true);
+    state.dirty = true;
+    renderCombined();
   });
   els.addColBtn.addEventListener('click', () => {
-    const t = state.tables[state.activeTable];
-    if (!t) return;
-    for (const row of t.rows) row.push('');
-    refreshPreview(true);
+    const c = state.combined;
+    if (!c || !c.rows.length) return;
+    for (const row of c.rows) row.push('');
+    state.dirty = true;
+    renderCombined();
   });
   els.delColBtn.addEventListener('click', () => {
-    const t = state.tables[state.activeTable];
-    if (!t || !t.rows.length) return;
-    const width = Math.max(...t.rows.map((r) => r.length));
+    const c = state.combined;
+    if (!c || !c.rows.length) return;
+    const width = Math.max(...c.rows.map((r) => r.length));
     if (width <= 1) {
       toast('A table needs at least one column.');
       return;
     }
-    for (const row of t.rows) row.splice(width - 1, 1);
-    refreshPreview(true);
-  });
-  els.removeTableBtn.addEventListener('click', () => {
-    if (!state.tables.length) return;
-    state.tables.splice(state.activeTable, 1);
-    state.activeTable = Math.max(0, Math.min(state.activeTable, state.tables.length - 1));
-    if (!state.tables.length) {
-      showNoTables();
-    } else {
-      refreshPreview(true);
-    }
+    for (const row of c.rows) row.splice(width - 1, 1);
+    state.dirty = true;
+    renderCombined();
   });
 
   showView('upload');
@@ -247,7 +240,7 @@ function resetFile() {
 function fullReset() {
   resetFile();
   state.tables = [];
-  state.activeTable = 0;
+  state.combined = null;
   state.forceOcr = false;
   state.showAllRows = false;
   showResult(false);
@@ -367,13 +360,15 @@ async function convert(forceOcr) {
       .slice(0, 20000);
 
     state.tables = tables;
-    state.activeTable = 0;
     state.ocrUsed = ocrUsed;
+    // Merge continuations, then combine EVERYTHING into one dataset:
+    // a single preview grid and a single-sheet Excel download.
+    state.combined = combineTables(tables);
 
     setProgress(97, 'Preparing preview', '');
     await nextFrame();
 
-    if (!tables.length) {
+    if (!state.combined.rows.length) {
       showNoTables();
     } else {
       showTables();
@@ -437,8 +432,7 @@ async function ocrPage(pdf, pageNumber, onStage) {
 function showTables() {
   const els = getEls();
   showView('file');
-  // Keep file bar visible above results? No — hide upload card chrome, show results.
-  // Actually keep the upload card in file state hidden and show result card.
+  // Hide upload card chrome, show results.
   els.uploadCard.querySelector('#dropzone').classList.add('hidden');
   els.fileState.classList.add('hidden');
   els.processingState.classList.add('hidden');
@@ -446,13 +440,13 @@ function showTables() {
   $('noTablesState').classList.add('hidden');
   $('tablesWrap').classList.remove('hidden');
 
-  const n = state.tables.length;
-  $('resultTitle').textContent = `${n} table${n === 1 ? '' : 's'} detected`;
+  const c = state.combined;
+  $('resultTitle').textContent = 'Table extracted — ready to download';
   $('resultSubtitle').textContent =
-    `${state.file ? state.file.name : ''}${state.ocrUsed ? ' • OCR was used for scanned pages' : ''} — review, edit, then download.`;
+    `${state.file ? state.file.name : ''}${state.ocrUsed ? ' • OCR was used for scanned pages' : ''} — review, edit, then download one Excel file.`;
 
   state.showAllRows = false;
-  renderActiveTable(true);
+  renderCombined();
   $('resultCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
@@ -482,52 +476,40 @@ function toggleRawText() {
   }
 }
 
-function renderActiveTable(resetTabs = false) {
-  const tables = state.tables;
-  if (!tables.length) return;
-  state.activeTable = Math.max(0, Math.min(state.activeTable, tables.length - 1));
-  const table = tables[state.activeTable];
-  if (resetTabs || $('tableTabs').childElementCount !== tables.length) {
-    renderTabs(tables, state.activeTable, (i) => {
-      state.activeTable = i;
-      state.showAllRows = false;
-      renderActiveTable();
-    });
-  } else {
-    // Update selected state without rebuilding.
-    [...$('tableTabs').children].forEach((btn, i) =>
-      btn.setAttribute('aria-selected', String(i === state.activeTable))
-    );
-  }
-  setConfidence(table);
-  renderPreview(table, {
+/**
+ * Render the single combined preview grid (all pages/tables merged).
+ * Edits write straight into state.combined.rows — exactly what gets
+ * exported, so the preview is always what-you-see-is-what-you-download.
+ */
+function renderCombined() {
+  const c = state.combined;
+  if (!c || !c.rows.length) return;
+  setCombinedMeta(c);
+  renderPreview(c, {
     showAll: state.showAllRows,
     onEdit: (structureChanged = false) => {
       state.dirty = true;
-      if (structureChanged) renderActiveTable();
-      else setConfidence(table);
+      if (structureChanged) renderCombined();
+      else setCombinedMeta(c);
     },
   });
-}
-
-function refreshPreview(rebuildTabs) {
-  renderActiveTable(rebuildTabs);
 }
 
 function handleDownload() {
   const errEl = $('exportError');
   if (errEl) errEl.classList.add('hidden');
   try {
-    if (!state.tables.length) {
+    if (!state.combined || !state.combined.rows.length) {
       toast('Nothing to export yet.');
       return;
     }
-    const wb = buildWorkbook(state.tables);
+    const base = state.file ? state.file.name.replace(/\.[^.]+$/, '') : 'All Data';
+    const wb = buildCombinedWorkbook(state.combined.rows, base);
     downloadWorkbook(wb, outputFilename(state.file ? state.file.name : 'tables'));
     toast(`Downloaded ${outputFilename(state.file ? state.file.name : 'tables')}`);
   } catch (err) {
     console.error(err);
-    const msg = 'Excel generation failed. Try removing empty tables or reloading the page.';
+    const msg = 'Excel generation failed. Try reloading the page.';
     if (errEl) {
       errEl.textContent = msg;
       errEl.classList.remove('hidden');

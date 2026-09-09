@@ -135,7 +135,6 @@
           </div>
 
           <div id="tablesWrap">
-            <div class="tabs" role="tablist" aria-label="Detected tables" id="tableTabs"></div>
             <div class="table-toolbar">
               <span class="confidence-pill" id="confidencePill"></span>
               <span class="muted small" id="tableMeta"></span>
@@ -143,12 +142,11 @@
               <button type="button" class="btn btn-ghost btn-small" id="addRowBtn">+ Row</button>
               <button type="button" class="btn btn-ghost btn-small" id="addColBtn">+ Column</button>
               <button type="button" class="btn btn-ghost btn-small" id="delColBtn">− Column</button>
-              <button type="button" class="btn btn-ghost btn-small btn-danger" id="removeTableBtn">Remove table</button>
             </div>
             <div class="table-scroll">
               <table id="previewTable" aria-label="Extracted table preview"></table>
             </div>
-            <p class="muted small preview-hint">Click any cell to edit. Edits are included in the Excel download. <button type="button" class="link-btn" id="showAllRowsBtn">Show all rows</button></p>
+            <p class="muted small preview-hint">All pages merged into one table below — click any cell to edit. The Excel file contains exactly this data. <button type="button" class="link-btn" id="showAllRowsBtn">Show all rows</button></p>
           </div>
           <p class="error-text hidden" id="exportError" role="alert"></p>
         </div>
@@ -195,6 +193,6 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.0.5/dist/tesseract.min.js"></script>
-  <script type="module" src="./js/app.js"></script>
+  <script type="module" src="./js/app.js?v=2"></script>
 </body>
 </html>

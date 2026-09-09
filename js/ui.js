@@ -15,9 +15,9 @@ export function cacheElements() {
     'fileState', 'fileName', 'fileDetails', 'removeFileBtn', 'convertBtn', 'fileError',
     'processingState', 'processingTitle', 'processingStage', 'processingPage',
     'progressBar', 'progressFill', 'progressPct', 'ocrNotice', 'cancelBtn',
-    'resultCard', 'resultTitle', 'resultSubtitle', 'tablesWrap', 'tableTabs',
+    'resultCard', 'resultTitle', 'resultSubtitle', 'tablesWrap',
     'confidencePill', 'tableMeta', 'previewTable', 'showAllRowsBtn',
-    'addRowBtn', 'addColBtn', 'delColBtn', 'removeTableBtn',
+    'addRowBtn', 'addColBtn', 'delColBtn',
     'downloadBtn', 'convertAnotherBtn',
     'noTablesState', 'forceOcrBtn', 'showRawTextBtn', 'rawTextWrap', 'rawText',
     'exportError', 'toast', 'ocrCanvas',
@@ -97,25 +97,34 @@ export function setFileError(msg) {
 }
 
 /**
- * Render table tabs.
- * @param {Array} tables
- * @param {number} activeIdx
- * @param {(idx:number)=>void} onSelect
+ * Render the combined-dataset meta line + confidence pill.
+ * @param {{rows:string[][], sources:Array<{pages:number[],rowCount:number,confidence:number}>}} combined
  */
-export function renderTabs(tables, activeIdx, onSelect) {
-  const wrap = els.tableTabs;
-  wrap.replaceChildren();
-  tables.forEach((t, i) => {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'tab';
-    btn.setAttribute('role', 'tab');
-    const label = `Table ${i + 1}${t.pageNumbers && t.pageNumbers.length === 1 ? ` — Page ${t.pageNumbers[0]}` : ''}`;
-    btn.textContent = label;
-    btn.setAttribute('aria-selected', String(i === activeIdx));
-    btn.addEventListener('click', () => onSelect(i));
-    wrap.appendChild(btn);
-  });
+export function setCombinedMeta(combined) {
+  const pill = els.confidencePill;
+  const rows = combined.rows || [];
+  const dataRows = Math.max(0, rows.length - 1);
+  const cols = rows[0] ? rows[0].length : 0;
+  const pages = new Set();
+  let best = 0;
+  for (const s of combined.sources || []) {
+    for (const p of s.pages || []) pages.add(p);
+    if (typeof s.confidence === 'number') best = Math.max(best, s.confidence);
+  }
+  if (pill) {
+    const label = best >= 0.7 ? 'High confidence' : best >= 0.42 ? 'Medium confidence' : 'Low confidence';
+    pill.textContent = `${label}${best ? ` (${Math.round(best * 100)}%)` : ''}`;
+    pill.className = 'confidence-pill ' + (best >= 0.7 ? 'high' : best >= 0.42 ? 'medium' : 'low');
+  }
+  if (els.tableMeta) {
+    const pageList = [...pages].sort((a, b) => a - b);
+    const scope = pageList.length
+      ? `pages ${pageList[0]}–${pageList[pageList.length - 1]} (${pageList.length})`
+      : 'all pages';
+    els.tableMeta.textContent =
+      `${dataRows} data rows × ${cols} columns • merged from ${scope}` +
+      `${(combined.sources || []).length > 1 ? ` • ${combined.sources.length} sections` : ''}`;
+  }
 }
 
 /**
@@ -185,17 +194,5 @@ export function renderPreview(table, opts) {
     } else {
       btn.classList.add('hidden');
     }
-  }
-}
-
-export function setConfidence(table) {
-  const pill = els.confidencePill;
-  if (!pill) return;
-  const label = table.confidenceLabel || '';
-  pill.textContent = `${label}${typeof table.confidence === 'number' ? ` (${Math.round(table.confidence * 100)}%)` : ''}`;
-  pill.className = 'confidence-pill ' + (table.confidence >= 0.7 ? 'high' : table.confidence >= 0.42 ? 'medium' : 'low');
-  if (els.tableMeta) {
-    const pages = (table.pageNumbers || []).join(', ');
-    els.tableMeta.textContent = `Page${table.pageNumbers && table.pageNumbers.length > 1 ? 's' : ''} ${pages} • ${table.rows.length} rows × ${table.rows[0] ? table.rows[0].length : 0} cols${table.source === 'ocr' ? ' • OCR' : ''}${table.fallback ? ' • recovered text' : ''}`;
   }
 }
