@@ -676,8 +676,39 @@ function round2(n) {
 }
 
 /**
+ * Map source header columns onto union header positions by label.
+ * Labeled columns match by normalized label text. Unlabeled (empty) ones
+ * and unmatched labels return -1 — the CALLER decides (positional pairing
+ * under a match gate, or appending a new visible slot). Never force a
+ * value into a wrong slot.
+ * @param {string[]} srcHeader
+ * @param {string[]} unionHeader
+ * @returns {number[]}
+ */
+export function mapColumnsToUnion(srcHeader, unionHeader) {
+  const norm = (s) => String(s || '').trim().toLowerCase();
+  const used = new Set();
+  const map = new Array(srcHeader.length).fill(-1);
+  srcHeader.forEach((h, c) => {
+    const n = norm(h);
+    if (!n) return;
+    for (let u = 0; u < unionHeader.length; u++) {
+      if (!used.has(u) && norm(unionHeader[u]) === n) {
+        used.add(u);
+        map[c] = u;
+        return;
+      }
+    }
+  });
+  return map;
+}
+
+/**
  * Merge tables across pages when a table clearly continues:
  * same column count + identical repeated header row.
+ * Rows are merged by HEADER-LABEL alignment, never by raw index, so a
+ * near-matching header can never shift values into wrong columns — if the
+ * labels do not line up, the tables stay separate instead.
  * @param {Array} tables - in page order
  * @returns {Array} merged tables with updated ids/titles
  */
@@ -694,12 +725,38 @@ export function mergeContinuedTables(tables) {
       headersEqual(prev.rows[0], cur.rows[0]) &&
       Math.abs(prev.pageNumbers[prev.pageNumbers.length - 1] - cur.pageNumbers[0]) <= 1
     ) {
-      prev.rows = [...prev.rows, ...cur.rows.slice(1)];
+      const map = mapColumnsToUnion(cur.rows[0], prev.rows[0]);
+      // Same width + gate passed: pair any leftovers positionally so an
+      // unnamed column (e.g. UM present as values but missing header text)
+      // still lands in its positional slot instead of blocking the merge.
+      const freeU = prev.rows[0].map((_, u) => u).filter((u) => !map.includes(u));
+      const leftover = cur.rows[0].map((_, c) => c).filter((c) => map[c] === -1);
+      leftover.forEach((c, k) => {
+        if (k < freeU.length) map[c] = freeU[k];
+      });
+      if (map.includes(-1)) {
+        out.push(cur); // labels do not line up: keep separate, never shift
+        continue;
+      }
+      const width = prev.rows[0].length;
+      const mapped = cur.rows.slice(1).map((r) => {
+        const nr = new Array(width).fill('');
+        r.forEach((val, c) => {
+          const u = map[c];
+          if (u === undefined || u < 0 || u >= width) return;
+          nr[u] = nr[u] ? `${nr[u]} ${val}`.trim() : val;
+        });
+        return nr;
+      });
+      prev.rows = [...prev.rows, ...mapped];
       // Adopt header labels the earlier pages were missing (e.g. a UM
       // header absent from page 1's text layer but present later).
-      prev.rows[0] = prev.rows[0].map((h, i) =>
-        String(h || '').trim() ? h : cur.rows[0][i] || h
-      );
+      cur.rows[0].forEach((h, c) => {
+        const u = map[c];
+        if (u >= 0 && !String(prev.rows[0][u] || '').trim() && String(h || '').trim()) {
+          prev.rows[0][u] = h;
+        }
+      });
       prev.pageNumbers = [...new Set([...prev.pageNumbers, ...cur.pageNumbers])];
       prev.confidence = round2(Math.min(1, (prev.confidence + cur.confidence) / 2 + 0.03));
       prev.confidenceLabel = confidenceLabel(prev.confidence);
@@ -778,98 +835,86 @@ export function mergeSameHeaderTables(tables) {
 
 /**
  * Combine all detected tables into ONE dataset for the single-sheet export.
- * Continuations are already merged; remaining distinct tables (different
- * sections, e.g. a page whose UM column is genuinely absent) are stacked
- * vertically with one blank separator row — but their columns are ALIGNED
- * by header label to the main table, so QTY stays under QTY instead of
- * shifting left when a middle column is missing. Tables whose headers
- * share almost nothing with the main one are appended as their own
- * section with their header kept.
+ * The union starts from the LONGEST header so no labeled column is ever
+ * left without a slot. Every table maps by shared header labels; columns
+ * with no counterpart extend the union visibly instead of shifting data.
+ * Row order always follows the input (page) order.
  * @param {Array<{id:string, pageNumbers:number[], confidence:number, rows:string[][]}>} tables
  * @returns {{rows:string[][], header:string[], sources:Array, pageCount:number}}
  */
 export function combineTables(tables) {
   if (!tables.length) return { rows: [], header: [], sources: [], pageCount: 0 };
-  // Main table = most rows (the document's data table).
-  const main = [...tables].sort((a, b) => b.rows.length - a.rows.length)[0];
+  // Union source = LONGEST header (most rows breaks ties). A narrow table
+  // missing labels must never define the union: otherwise wider tables'
+  // labeled columns (e.g. UM) cannot align and silently shift.
+  const main = [...tables].sort(
+    (a, b) => b.rows[0].length - a.rows[0].length || b.rows.length - a.rows.length
+  )[0];
   const union = main.rows[0].slice();
-  const norm = (s) => String(s || '').trim().toLowerCase();
-
-  /** Map a table's column indexes onto union positions, or null for own section. */
-  const alignTable = (t) => {
-    const head = t.rows[0];
-    const used = new Set();
-    const map = head.map((h) => {
-      const n = norm(h);
-      if (!n) return -2; // empty label: positional fallback below
-      for (let u = 0; u < union.length; u++) {
-        if (!used.has(u) && norm(union[u]) === n) {
-          used.add(u);
-          return u;
-        }
-      }
-      return -1;
-    });
-    // Positional fallback for empty labels: nearest free union slot that
-    // keeps left-to-right order (matches e.g. an unnamed UM column sitting
-    // between DESCRIPTION and QTY on both tables).
-    let cursor = 0;
-    map.forEach((m, c) => {
-      if (m !== -2) {
-        cursor = m + 1;
-        return;
-      }
-      while (cursor < union.length && used.has(cursor)) cursor++;
-      if (cursor < union.length) {
-        used.add(cursor);
-        map[c] = cursor;
-        cursor++;
-      } else {
-        map[c] = union.length; // append new trailing column
-      }
-    });
-    if (map.includes(-1)) return null; // labels don't fit: own section
-    // Require at least half the non-empty labels to really match.
-    const nonEmpty = head.filter((h) => norm(h));
-    if (nonEmpty.length > 0) {
-      let hits = 0;
-      head.forEach((h, c) => {
-        if (norm(h) && map[c] < union.length && norm(union[map[c]]) === norm(h)) hits++;
-      });
-      if (hits / nonEmpty.length < 0.5) return null;
-    }
-    return map;
+  const adopted = union.slice();
+  // Per-slot label votes. Every table's header row votes once, so a
+  // one-page glitch label (e.g. I-JM for UM) can never outvote a label the
+  // rest of the document agrees on. Empty labels never vote. Ties keep the
+  // earliest (leftmost-table) label.
+  const votes = union.map(() => new Map());
+  const growUnion = (label) => {
+    union.push(label || '');
+    adopted.push(label || '');
+    votes.push(new Map());
+    return union.length - 1;
   };
 
+  // Pass 1: align every table to the union via shared labels. Leftovers
+  // pair positionally ONLY for same-width tables whose labels mostly match
+  // (same physical template with a renamed/missing label, e.g. UM/glitch
+  // variants) — everything else EXTENDS the union visibly. Nothing is ever
+  // squeezed into a wrong slot and nothing is ever dropped.
+  // Header labels are decided by majority vote per slot at the end, so a
+  // one-page glitch label can never rename a column the rest call UM.
+  const plans = tables.map((t) => {
+    const head = t.rows[0];
+    const map = mapColumnsToUnion(head, union);
+    const matched = map.filter((m) => m !== -1).length;
+    if (head.length === union.length && matched / head.length >= 0.5) {
+      const freeU = union.map((_, u) => u).filter((u) => !map.includes(u));
+      const leftover = head.map((_, c) => c).filter((c) => map[c] === -1);
+      leftover.forEach((c, k) => {
+        if (k < freeU.length) map[c] = freeU[k];
+      });
+    }
+    head.forEach((h, c) => {
+      if (map[c] !== -1) return;
+      map[c] = growUnion(h || '');
+    });
+    return { t, map, aligned: true };
+  });
+
+  // Pass 2: emit rows in original (page) order. Row order is sacred: the
+  // sheet must read top-to-bottom exactly like the PDF.
   /** @type {string[][]} */
   const rows = [];
   const sources = [];
   const pages = new Set();
-  // Adopt missing header labels from later tables (e.g. UM absent on p1).
-  const adopted = union.slice();
-
-  tables.forEach((t, ti) => {
+  plans.forEach(({ t, map, aligned }, ti) => {
     for (const p of t.pageNumbers || []) pages.add(p);
-    const map = alignTable(t);
     if (ti > 0) rows.push(new Array(union.length).fill(''));
     const startRow = rows.length;
     t.rows.forEach((r, ri) => {
-      if (map) {
-        const nr = new Array(union.length).fill('');
-        r.forEach((val, c) => {
-          const u = map[c] < union.length ? map[c] : union.length - 1;
-          if (ri === 0 && !String(adopted[u] || '').trim() && String(val || '').trim()) {
-            adopted[u] = val; // adopt label (e.g. UM) for the combined header
-          }
-          nr[u] = nr[u] ? `${nr[u]} ${val}`.trim() : val;
-        });
-        rows.push(nr);
-      } else {
-        // Own section: keep its header, pad to union width.
-        const nr = r.slice();
-        while (nr.length < union.length) nr.push('');
-        rows.push(nr);
-      }
+      const nr = new Array(union.length).fill('');
+      r.forEach((val, c) => {
+        let u = map[c];
+        if (u === undefined || u === null || u < 0) {
+          // Safety net: grow, never drop and never misplace.
+          u = growUnion('');
+        }
+        while (nr.length <= u) nr.push('');
+        if (ri === 0) {
+          const v = String(val || '').trim();
+          if (v) votes[u].set(v, (votes[u].get(v) || 0) + 1);
+        }
+        nr[u] = nr[u] ? `${nr[u]} ${val}`.trim() : val;
+      });
+      rows.push(nr);
     });
     sources.push({
       id: t.id,
@@ -877,10 +922,26 @@ export function combineTables(tables) {
       startRow,
       rowCount: t.rows.length,
       confidence: t.confidence,
-      aligned: !!map,
+      aligned,
     });
   });
 
+  // Pad every row to the final width (union may have grown during emit).
+  rows.forEach((r) => {
+    while (r.length < union.length) r.push('');
+  });
+  // Final header = majority vote per slot (ties keep the earliest label).
+  for (let u = 0; u < union.length; u++) {
+    let bestLabel = '';
+    let bestVotes = 0;
+    for (const [label, count] of votes[u]) {
+      if (count > bestVotes) {
+        bestVotes = count;
+        bestLabel = label;
+      }
+    }
+    adopted[u] = bestLabel;
+  }
   if (rows.length) rows[0] = adopted.slice();
   return { rows, header: adopted.slice(), sources, pageCount: pages.size };
 }
