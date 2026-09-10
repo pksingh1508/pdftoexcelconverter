@@ -74,7 +74,7 @@ async function init() {
   cacheElements();
   const els = getEls();
   configurePdfWorker();
-  editor = createEditor({ getData: () => state.combined,
+  editor = createEditor({ getData: () => state.combined, getPdf: () => state.pdf,
     onEdit: () => { state.dirty = true; renderCombined(); }, onDownload: handleDownload });
   $('retryOcrBtn').addEventListener('click', () => convert(true));
   $('editBtn').addEventListener('click', () => editor.open(state.file));
@@ -189,6 +189,9 @@ async function handleFile(file) {
   }
   editor.reset();
   state.pdf?.destroy();
+  const loadId = (state.loadId || 0) + 1;
+  state.loadId = loadId;
+  els.convertBtn.disabled = true;
   state.file = file;
   state.pdf = null;
   state.pageCount = 0;
@@ -201,16 +204,20 @@ async function handleFile(file) {
   try {
     configurePdfWorker();
     const { pdf, pageCount } = await loadPdf(file);
+    if (state.loadId !== loadId) { await pdf.destroy(); return; }
     state.pdf = pdf;
     state.pageCount = pageCount;
+    els.convertBtn.disabled = false;
     els.fileDetails.textContent = `${formatBytes(file.size)} • ${pageCount} page${pageCount === 1 ? '' : 's'}`;
   } catch (err) {
+    if (state.loadId !== loadId) return;
     els.fileDetails.textContent = `${formatBytes(file.size)}`;
     setFileError(friendlyError(err));
   }
 }
 
 function resetFile() {
+  state.loadId = (state.loadId || 0) + 1;
   editor.reset();
   state.pdf?.destroy();
   state.file = null;

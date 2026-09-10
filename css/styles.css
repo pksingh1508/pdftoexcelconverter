@@ -269,3 +269,8 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   .formula-bar label, #cellSource { display: none; }
   .editor-footer .small { display: none; }
 }
+#sourcePdf { overflow: auto; min-height: 0; background: #e2e8f0; }
+#sourcePdf canvas { display: block; width: 100%; height: auto; }
+.source-controls { padding: 0 8px; font-size: 12px; }
+.source-controls input { width: 70px; padding: 4px; border: 1px solid var(--border-strong); }
+#sourceStatus { padding: 0 8px; margin: 4px 0; }

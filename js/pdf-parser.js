@@ -76,7 +76,6 @@ export async function extractPageTextItems(pdf, pageNumber) {
   const page = await pdf.getPage(pageNumber);
   try {
     const viewport = page.getViewport({ scale: 1 });
-    const pageHeight = viewport.height;
     const textContent = await page.getTextContent();
 
     /** @type {Array} */
@@ -87,18 +86,22 @@ export async function extractPageTextItems(pdf, pageNumber) {
       // transform = [scaleX, skewY, skewX, scaleY, x, y] in PDF (bottom-left origin) units.
       const t = raw.transform || [1, 0, 0, 1, 0, 0];
       const transformed = getPdfJs().Util.transform(viewport.transform, t);
-      const x = transformed[4];
-      // Normalize to top-left origin so OCR + PDF share one coordinate system.
-      const yBottom = t[5];
-      const y = transformed[5] - Math.abs(raw.height || t[0] || 10);
       const height = Math.abs(raw.height || t[0] || 10) || 10;
       const width = Math.abs(raw.width || str.length * (height * 0.55)) || 10;
+      const baseline = Math.hypot(transformed[0], transformed[1]) || 1;
+      const vertical = Math.hypot(transformed[2], transformed[3]) || 1;
+      const dx = transformed[0] / baseline * width;
+      const dy = transformed[1] / baseline * width;
+      const hx = transformed[2] / vertical * height;
+      const hy = transformed[3] / vertical * height;
+      const xs = [transformed[4], transformed[4] + dx, transformed[4] + hx, transformed[4] + dx + hx];
+      const ys = [transformed[5], transformed[5] + dy, transformed[5] + hy, transformed[5] + dy + hy];
       items.push({
         text: str,
-        x,
-        y,
-        width,
-        height,
+        x: Math.min(...xs),
+        y: Math.min(...ys),
+        width: Math.max(...xs) - Math.min(...xs),
+        height: Math.max(...ys) - Math.min(...ys),
         page: pageNumber,
         source: 'pdf-text',
       });
@@ -144,9 +147,9 @@ export async function renderPageToCanvas(pdf, pageNumber, canvas, scale = CONFIG
  * @param {Array} textItems
  */
 export function pageNeedsOcr(textItems) {
-  if (!textItems || textItems.length < CONFIG.MIN_TEXT_ITEMS_BEFORE_OCR) return true;
-  const chars = textItems.reduce((n, it) => n + (it.text ? it.text.length : 0), 0);
-  return chars < CONFIG.MIN_TEXT_CHARS_BEFORE_OCR;
+  // A short, usable text page must not be replaced by noisier OCR.
+  // The user can explicitly retry OCR for incomplete embedded text layers.
+  return !textItems?.some(item => String(item.text || '').trim());
 }
 
 /**

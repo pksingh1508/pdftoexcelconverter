@@ -50,7 +50,7 @@ test('Excel preserves ambiguous financial values, precision and formula-like tex
 });
 test('PDF viewport transform handles cropped coordinates and releases pages', async () => {
  let cleaned=false;
- globalThis.pdfjsLib={Util:{transform:(v,t)=>[1,0,0,1,t[4]-50,800-t[5]]}};
+ globalThis.pdfjsLib={Util:{transform:(v,t)=>[10,0,0,-10,t[4]-50,800-t[5]]}};
  const pdf={getPage:async()=>({getViewport:()=>({transform:[1,0,0,-1,-50,800]}),getTextContent:async()=>({items:[{str:'X',transform:[10,0,0,10,100,700],width:10,height:10}]}),cleanup:()=>{cleaned=true}})};
  const items=await extractPageTextItems(pdf,1); assert.equal(items[0].x,50); assert.equal(items[0].y,90); assert.ok(cleaned);
 });

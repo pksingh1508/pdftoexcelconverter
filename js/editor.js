@@ -1,3 +1,4 @@
+import { renderPageToCanvas, releaseCanvas } from './pdf-parser.js';
 import { CONFIG } from './config.js';
 
 export function columnLabel(index) {
@@ -7,11 +8,35 @@ export function columnLabel(index) {
 }
 
 /** A paged spreadsheet view. All edits update the same grid used by export. */
-export function createEditor({ getData, onEdit, onDownload }) {
+export function createEditor({ getData, getPdf, onEdit, onDownload }) {
   const $ = id => document.getElementById(id);
   const dialog = $('editorDialog');
   let selected = [0, 0], offset = 0, history = [], redo = [], sourceUrl = null;
   let editingSnapshot = null;
+  let sourceRequest = 0, renderedPage = 0;
+  async function showPage(page) {
+    const pdf = getPdf();
+    if (!pdf || $('sourcePane').classList.contains('hidden')) return;
+    page = Math.max(1, Math.min(pdf.numPages, page || 1));
+    if (renderedPage === page) return;
+    renderedPage = page;
+    const request = ++sourceRequest;
+    $('sourcePage').value = page;
+    $('sourcePage').max = pdf.numPages;
+    $('sourceStatus').textContent = `Rendering page ${page}…`;
+    const canvas = document.createElement('canvas');
+    try {
+      await renderPageToCanvas(pdf, page, canvas, CONFIG.SOURCE_PREVIEW_SCALE);
+      if (request !== sourceRequest) { releaseCanvas(canvas); return; }
+      for (const old of $('sourcePdf').querySelectorAll('canvas')) releaseCanvas(old);
+      $('sourcePdf').replaceChildren(canvas);
+      $('sourceStatus').textContent = `Page ${page} of ${pdf.numPages}`;
+    } catch {
+      releaseCanvas(canvas); renderedPage = 0;
+      if (request === sourceRequest) $('sourceStatus').textContent = 'Preview could not load. Use Open original PDF above.';
+    }
+  }
+  $('sourcePage').onchange = e => showPage(Number(e.target.value));
   const snapshot = () => structuredClone(getData());
   function remember(before = snapshot()) {
     history.push(before);
@@ -41,10 +66,12 @@ export function createEditor({ getData, onEdit, onDownload }) {
   }
   function select(r, c) {
     selected = [r, c];
+    $('toggleHeading').textContent = getData().headerRows.includes(r) ? 'Unmark heading' : 'Mark as heading';
     $('cellAddress').textContent = `${columnLabel(c)}${r + 1}`;
     $('cellValue').value = getData().rows[r][c] ?? '';
     const page = getData().rowOrigins?.[r]?.page;
     $('cellSource').textContent = page ? `PDF page ${page}` : 'Added row';
+    if (page) showPage(page);
     for (const cell of $('editorGrid').querySelectorAll('.selected')) cell.classList.remove('selected');
     $('editorGrid').querySelector(`[data-r="${r}"][data-c="${c}"]`)?.classList.add('selected');
   }
@@ -144,8 +171,8 @@ export function createEditor({ getData, onEdit, onDownload }) {
   $('toggleHeading').onclick = () => change(d => {
     d.headerRows = d.headerRows.includes(selected[0]) ? d.headerRows.filter(r => r !== selected[0]) : [...d.headerRows, selected[0]];
   });
-  $('previousRows').onclick = () => { offset -= CONFIG.EDITOR_PAGE_SIZE; render(); };
-  $('nextRows').onclick = () => { offset += CONFIG.EDITOR_PAGE_SIZE; render(); };
+  $('previousRows').onclick = () => { offset -= CONFIG.EDITOR_PAGE_SIZE; selected[0] = offset; render(); };
+  $('nextRows').onclick = () => { offset += CONFIG.EDITOR_PAGE_SIZE; selected[0] = offset; render(); };
   $('goToRow').onchange = e => focusCell((Number(e.target.value) || 1) - 1, selected[1]);
   $('nextIssue').onclick = () => {
     const rows = [...new Set(getData().issues.map(i => i.row))].sort((a, b) => a - b);
@@ -155,7 +182,7 @@ export function createEditor({ getData, onEdit, onDownload }) {
     $('sourcePane').classList.toggle('hidden');
     const visible = !$('sourcePane').classList.contains('hidden');
     $('showSource').setAttribute('aria-expanded', String(visible));
-    if (visible && sourceUrl) $('sourcePdf').src = `${sourceUrl}#page=${getData().rowOrigins?.[selected[0]]?.page || 1}`;
+    if (visible) showPage(getData().rowOrigins?.[selected[0]]?.page || 1);
   };
   $('editorDownload').onclick = onDownload;
   $('closeEditor').onclick = () => dialog.close();
@@ -165,7 +192,7 @@ export function createEditor({ getData, onEdit, onDownload }) {
       if (!getData()?.rows.length) return;
       if (sourceUrl) URL.revokeObjectURL(sourceUrl);
       sourceUrl = URL.createObjectURL(file);
-      $('sourcePdf').src = sourceUrl;
+      renderedPage = 0;
       $('sourceLink').href = sourceUrl;
       $('editorFilename').textContent = file.name;
       render(); dialog.showModal(); document.body.classList.add('editing');
@@ -173,7 +200,9 @@ export function createEditor({ getData, onEdit, onDownload }) {
     reset() {
       history = []; redo = []; offset = 0; selected = [0, 0];
       if (dialog.open) dialog.close();
-      $('sourcePdf').removeAttribute('src');
+      sourceRequest++; renderedPage = 0;
+      for (const canvas of $('sourcePdf').querySelectorAll('canvas')) releaseCanvas(canvas);
+      $('sourcePdf').replaceChildren();
       if (sourceUrl) URL.revokeObjectURL(sourceUrl);
       sourceUrl = null;
     },
