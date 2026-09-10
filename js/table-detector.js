@@ -200,15 +200,10 @@ function nonEmptyCount(row) {
   return row.filter((c) => String(c || '').trim() !== '').length;
 }
 
-function rowGap(rows, i) {
-  if (i <= 0 || i >= rows.length) return 0;
-  return Math.abs(rows[i].y - rows[i - 1].y);
-}
-
 function medianGap(rows) {
   if (rows.length < 2) return 14;
   const gaps = [];
-  for (let i = 1; i < rows.length; i++) gaps.push(rowGap(rows, i));
+  for (let i = 1; i < rows.length; i++) gaps.push(Math.abs(rows[i].y - rows[i - 1].y));
   gaps.sort((a, b) => a - b);
   return gaps[Math.floor(gaps.length / 2)] || 14;
 }
@@ -264,21 +259,6 @@ function confidenceLabel(score) {
  * (Rarely triggers now that gap-joining collapses prose to 1-2 cells,
  * but kept as a safety net for widely-spaced justified text.)
  * @param {{cells:Cell[]}} row
- */
-function isProseRow(row) {
-  const n = row.cells.length;
-  if (n < 4) return false;
-  const joined = row.cells.map((c) => c.text).join(' ');
-  if (joined.length > 110) return true;
-  return false;
-}
-
-/**
- * Detect tables on a single page from normalized text items.
- *
- * @param {TextItem[]} items
- * @param {number} pageNumber
- * @returns {Array<{id:string, pageNumbers:number[], confidence:number, confidenceLabel:string, rows:string[][], source:string}>}
  */
 export function detectTablesOnPage(items, pageNumber) {
   if (!items?.length) return [];
@@ -375,6 +355,7 @@ export function detectTablesOnPage(items, pageNumber) {
       rowOrigins: block.map(r => ({ page: pageNumber, y: r.y })),
       // Only style a plausible heading; never invent or replace labels.
       headerRows: !fallback && block[0].cells.length >= 2 &&
+        (block[0].cells.length >= CONFIG.HEADER_MIN_CELLS || block[0].cells.length === columns.length) &&
         block[0].cells.every(c => !/^[\d\s.,+%$₹€£()-]+$/.test(c.text)) ? [0] : [],
     };
   });

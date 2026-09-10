@@ -208,7 +208,7 @@
       <div class="formula-bar"><output id="cellAddress">A1</output><label for="cellValue">Cell value</label><textarea id="cellValue" rows="2" spellcheck="false"></textarea><span id="cellSource" class="small muted"></span></div>
       <div class="editor-workspace">
         <div class="editor-grid-scroll"><table id="editorGrid" aria-label="Editable spreadsheet"></table></div>
-        <aside id="sourcePane" class="hidden"><a id="sourceLink" target="_blank" rel="noopener">Open original PDF in a new tab</a><label class="source-controls">PDF page <input id="sourcePage" type="number" min="1" value="1"></label><p id="sourceStatus" class="small muted" role="status"></p><div id="sourcePdf" aria-label="Original PDF for comparison"></div></aside>
+        <aside id="sourcePane" class="hidden"><a id="sourceLink" target="_blank" rel="noopener">Open original PDF in a new tab</a><div class="source-controls"><label>PDF page <input id="sourcePage" type="number" min="1" value="1"></label> <label>Zoom <select id="sourceZoom"><option value="100">Fit width</option><option value="150">150%</option><option value="200">200%</option><option value="300">300%</option></select></label></div><p id="sourceStatus" class="small muted" role="status"></p><div id="sourcePdf" aria-label="Original PDF for comparison"></div></aside>
       </div>
       <footer class="editor-footer"><span id="editorRange"></span><label>Go to row <input id="goToRow" type="number" min="1" value="1"></label><button class="btn btn-small btn-secondary" id="previousRows">Previous rows</button><button class="btn btn-small btn-secondary" id="nextRows">Next rows</button><span class="muted small">Changes save automatically · Tab / Enter to navigate · Shift+Enter for a line break</span></footer>
     </div>

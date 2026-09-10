@@ -36,6 +36,7 @@ export function createEditor({ getData, getPdf, onEdit, onDownload }) {
       if (request === sourceRequest) $('sourceStatus').textContent = 'Preview could not load. Use Open original PDF above.';
     }
   }
+  $('sourceZoom').onchange = e => { $('sourcePdf').style.setProperty('--pdf-zoom', `${e.target.value}%`); };
   $('sourcePage').onchange = e => showPage(Number(e.target.value));
   const snapshot = () => structuredClone(getData());
   function remember(before = snapshot()) {

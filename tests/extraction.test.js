@@ -61,3 +61,22 @@ test('corrupt and password-protected files fail with friendly errors', async () 
  }
 });
 test('blank pages return no invented cells',()=>assert.deepEqual(detectTablesOnPage([],1),[]));
+
+test('matching physical templates retain an entirely absent middle column', () => {
+ const mk = (page, head, body, columns) => ({id:`p${page}`,pageNumbers:[page],y:0,rows:[head,body],columns,headerRows:[0],issues:[]});
+ const c=combineTables([
+  mk(1,['Item','Qty'],['A','2'],[{x0:0,x1:50},{x0:300,x1:340}]),
+  mk(2,['Item','','Qty'],['B','PC','3'],[{x0:0,x1:50},{x0:150,x1:170},{x0:300,x1:340}]),
+ ]);
+ assert.deepEqual(c.rows,[['Item','','Qty'],['A','','2'],['Item','','Qty'],['B','PC','3']]);
+});
+test('short usable text is never automatically replaced by OCR', async () => {
+ const {pageNeedsOcr}=await import('../js/pdf-parser.js');
+ assert.equal(pageNeedsOcr([item('ID',0,0)]),false);assert.equal(pageNeedsOcr([]),true);
+});
+test('rotated viewport produces the correct text bounding box', async () => {
+ globalThis.pdfjsLib={Util:{transform:()=>[0,10,10,0,100,50]}};
+ const pdf={getPage:async()=>({getViewport:()=>({transform:[]}),getTextContent:async()=>({items:[{str:'Test',transform:[10,0,0,10,0,0],width:40,height:10}]}),cleanup(){}})};
+ const [i]=await extractPageTextItems(pdf,1);
+ assert.deepEqual([i.x,i.y,i.width,i.height],[100,50,10,40]);
+});

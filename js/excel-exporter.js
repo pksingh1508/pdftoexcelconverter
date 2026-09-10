@@ -51,6 +51,7 @@ export function styleWorksheet(ws, headerRowIndexes = [0]) {
         // Create the cell so borders render continuously across blanks.
         cell = ws[addr] = { t: 's', v: '' };
       }
+      cell.s = { ...(cell.s || {}), alignment: { vertical: 'top', wrapText: true } };
       if (isHeader) {
         cell.s = {
           ...(cell.s || {}),

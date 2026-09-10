@@ -53,6 +53,8 @@ npm test
 
 The dependency-free Node tests cover heading and missing-cell alignment, duplicate labels, financial values, right-aligned numbers, multiline headings, small tables, multi-page order, prose fallback, blank pages, retained low-confidence OCR, crop coordinates, corrupt/password-protected errors, and missing/duplicate token detection.
 
+An optional browser regression script is in `tests/browser.mjs`. With Playwright installed and the app served locally, run `node tests/browser.mjs`. Set `PLAYWRIGHT_MODULE` to an absolute Playwright module path if needed; `TEST_BASE_URL` defaults to localhost port 8080. It uses the included 32-page PDF and writes QA screenshots and a workbook to the system temporary directory.
+
 Additional development checks ran the pinned PDF.js build against both included documents (60 pages, 22,678 source fragments), with zero token loss or duplication. Browser checks cover conversion, editing, undo/redo, row/column insertion, pagination, PDF comparison, modal close/reopen, mobile layout and a downloaded XLSX round trip. This does not certify every source value or constitute an OCR accuracy benchmark.
 
 ## Modules
