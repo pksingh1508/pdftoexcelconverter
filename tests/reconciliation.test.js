@@ -88,3 +88,35 @@ test('line preprocessing removes long borders while retaining isolated glyph str
  removeTableLines({width,height,getContext:()=>ctx},1);
  assert.equal(data[(5*width+50)*4],255);assert.equal(data[(18*width+10)*4],0);
 });
+
+test('partial OCR consensus cannot truncate an existing unit or identifier',()=>{
+ const r=reconcileReadings([pdf('2 IN')],[word('2')],[word('2')]);
+ assert.equal(r.items[0].text,'2 IN');assert.equal(r.counts.corrected,0);
+});
+test('slightly displaced identical punctuation is not duplicated',()=>{
+ const a={...pdf('-',100,20),width:4,height:2};
+ const b={...word('-',100,23),width:4,height:2};
+ const r=reconcileReadings([a],[b],[b]);assert.equal(r.items.length,1);assert.equal(r.counts.recovered,0);
+});
+test('agreed ruling boundaries preserve narrow neighbouring and fully empty columns',()=>{
+ const columns=[{x0:0,x1:25},{x0:25,x1:50},{x0:50,x1:75}];
+ const items=[word('UM',5),word('QTY',28),word('PC',5,20),word('2',28,20)].map(i=>({...i,width:18,tableColumn:i.x<25?0:1,tableColumns:columns}));
+ assert.deepEqual(combineTables(detectTablesOnPage(items,1)).rows,[['UM','QTY',''],['PC','2','']]);
+});
+test('visual verification failures retain PDF text and mark both passes incomplete',async()=>{
+ const {verifyPage}=await import('../js/page-verifier.js');
+ const {terminateOcrEngine}=await import('../js/ocr.js');
+ const previousDocument=globalThis.document, previousTesseract=globalThis.Tesseract;
+ globalThis.document={createElement:()=>{
+  const canvas={width:0,height:0};
+  canvas.getContext=()=>({fillRect(){},drawImage(){},clearRect(){},putImageData(){},getImageData:()=>({width:canvas.width,height:canvas.height,data:new Uint8ClampedArray(canvas.width*canvas.height*4).fill(255)})});
+  return canvas;
+ }};
+ globalThis.Tesseract={createWorker:async()=>{throw new Error('model unavailable');}};
+ const document={getPage:async()=>({getViewport:()=>({width:20,height:20}),render:()=>({promise:Promise.resolve()}),cleanup(){}})};
+ try{
+  const result=await verifyPage(document,1,[pdf('Retain me')]);
+  assert.equal(result.items[0].text,'Retain me');assert.equal(result.failures.length,2);assert.equal(result.completed,0);
+  await assert.rejects(verifyPage(document,1,[]),/could not be read/);
+ }finally{await terminateOcrEngine();globalThis.document=previousDocument;globalThis.Tesseract=previousTesseract;}
+});

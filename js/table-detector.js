@@ -120,7 +120,8 @@ export function splitRowIntoCells(items) {
   };
   for (let i = 1; i < sorted.length; i++) {
     const it = sorted[i];
-    if (gaps[i - 1] > threshold) {
+    const knownColumns = it.tableColumn !== undefined && sorted[i - 1].tableColumn !== undefined;
+    if (knownColumns ? it.tableColumn !== sorted[i - 1].tableColumn : gaps[i - 1] > threshold) {
       cells.push(cur);
       cur = { text: it.text, x0: it.x, x1: it.x + (it.width || 0) };
     } else {
@@ -290,10 +291,11 @@ export function detectTablesOnPage(items, pageNumber) {
     const modelRows = [...block].sort((a, b) =>
       (frequency.get(b.cells.length) - frequency.get(a.cells.length)) ||
       b.cells.reduce((n, c) => n + c.x1 - c.x0, 0) - a.cells.reduce((n, c) => n + c.x1 - c.x0, 0));
-    const columns = buildBlockColumns(modelRows);
+    const ruledColumns = block.every(r => r.items.every(it => it.tableColumns)) ? block[0].items[0].tableColumns : null;
+    const columns = ruledColumns ? ruledColumns.map(c => ({ ...c })) : buildBlockColumns(modelRows);
     // Fuse offset heading/body spans only when no source row demonstrates
     // that they are separate cells (protects adjacent numeric columns).
-    for (let a = 0; a < columns.length; a++) {
+    for (let a = 0; !ruledColumns && a < columns.length; a++) {
       for (let b = a + 1; b < columns.length; b++) {
         const overlap = Math.min(columns[a].x1, columns[b].x1) - Math.max(columns[a].x0, columns[b].x0);
         if (overlap <= 0) continue;

@@ -10,11 +10,13 @@ export function removeTableLines(canvas, scale) {
   for (let i = 0; i < dark.length; i++) dark[i] = (data[i * 4] + data[i * 4 + 1] + data[i * 4 + 2]) / 3 < CONFIG.OCR_LINE_THRESHOLD ? 1 : 0;
   const minimum = Math.round(CONFIG.OCR_LINE_MIN_POINTS * scale);
   const allowedGap = Math.max(1, Math.round(CONFIG.OCR_LINE_GAP_POINTS * scale));
-  function scan(lines, length, position) {
+  const horizontal = new Uint32Array(height), vertical = new Uint32Array(width);
+  function scan(lines, length, position, projection) {
     for (let line = 0; line < lines; line++) {
       let start = -1, last = -1;
       const finish = () => {
         if (start >= 0 && last - start + 1 >= minimum) {
+          projection[line] += last - start + 1;
           for (let at = start; at <= last; at++) mask[position(line, at)] = 1;
         }
         start = last = -1;
@@ -26,11 +28,22 @@ export function removeTableLines(canvas, scale) {
       finish();
     }
   }
-  scan(height, width, (row, col) => row * width + col);
-  scan(width, height, (col, row) => row * width + col);
+  scan(height, width, (row, col) => row * width + col, horizontal);
+  scan(width, height, (col, row) => row * width + col, vertical);
   for (let i = 0; i < mask.length; i++) if (mask[i]) {
     data[i * 4] = data[i * 4 + 1] = data[i * 4 + 2] = 255;
   }
   ctx.putImageData(image, 0, 0);
-  return mask.reduce((sum, value) => sum + value, 0);
+  function peaks(projection, threshold) {
+    const groups = [];
+    for (let i = 0; i < projection.length; i++) if (projection[i] >= threshold) {
+      if (!groups.length || i - groups.at(-1).at(-1) > CONFIG.OCR_RULING_CLUSTER_POINTS * scale) groups.push([]);
+      groups.at(-1).push(i);
+    }
+    return groups.map(g => Math.round(g.reduce((n, i) => n + i * projection[i], 0) / g.reduce((n, i) => n + projection[i], 0)));
+  }
+  return { removedPixels: mask.reduce((sum, value) => sum + value, 0),
+    horizontal: peaks(horizontal, width * CONFIG.OCR_RULING_ROW_FRACTION),
+    vertical: peaks(vertical, height * CONFIG.OCR_RULING_COLUMN_FRACTION) };
+
 }

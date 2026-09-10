@@ -7,6 +7,10 @@ const comparable = text => text.normalize('NFC').replace(/\s+/g, '');
 
 function overlaps(a, b) {
   if (a.page !== b.page) return false;
+  const sameNearbyText = comparable(a.text) === comparable(b.text) &&
+    Math.abs(a.x + a.width / 2 - b.x - b.width / 2) <= CONFIG.ROW_Y_TOLERANCE &&
+    Math.abs(a.y + a.height / 2 - b.y - b.height / 2) <= CONFIG.ROW_Y_TOLERANCE;
+  if (sameNearbyText) return true;
   if (Math.abs(a.y + a.height / 2 - b.y - b.height / 2) > Math.min(a.height, b.height) * CONFIG.VERIFY_CENTER_TOLERANCE) return false;
   const x = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x);
   const y = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y);
@@ -24,7 +28,7 @@ export function reconcileReadings(pdfItems, firstPass, secondPass) {
     const a = indexes[ai], A = entries[a];
     for (let bi = ai + 1; bi < indexes.length; bi++) {
       const b = indexes[bi], B = entries[b];
-      if (B.item.y >= A.item.y + A.item.height) break;
+      if (B.item.y >= A.item.y + A.item.height + CONFIG.ROW_Y_TOLERANCE) break;
       if (A.pass !== B.pass && overlaps(A.item, B.item)) parent[root(b)] = root(a);
     }
   }
@@ -43,7 +47,8 @@ export function reconcileReadings(pdfItems, firstPass, secondPass) {
       Math.min(confidence[1], confidence[2]) >= CONFIG.VERIFY_MIN_CONFIDENCE;
     const agreesWithPdf = !!exact[0] && (exact[0] === exact[1] || exact[0] === exact[2]);
     let selected = 0, status;
-    if (consensus && (!exact[0] || exact[0] !== exact[1])) {
+    const completeCorrection = !exact[0] || Math.min(exact[0].length, exact[1].length) / Math.max(exact[0].length, exact[1].length) >= CONFIG.VERIFY_MIN_CORRECTION_LENGTH_RATIO;
+    if (consensus && completeCorrection && (!exact[0] || exact[0] !== exact[1])) {
       selected = confidence[1] >= confidence[2] ? 1 : 2;
       status = exact[0] ? 'corrected' : 'recovered';
     } else if (exact[0]) {

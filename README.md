@@ -20,15 +20,18 @@ Open http://127.0.0.1:8080. Vendor libraries and OCR models require internet acc
 - Every page and section stays in source order, including repeated headings, sparse rows, small tables, prose and footers. Uncertain non-table text is retained visibly rather than silently discarded.
 - Matching physical templates can contribute an empty column missing on another page. Values remain in left-to-right order; there is no header-label union, majority-vote renaming, or regrouping of distant tables.
 - Sparse and wrapped physical lines remain separate rows for review. The editor can correct them explicitly.
-- OCR runs automatically only when a page has no usable text. Low-confidence recognized words are retained and flagged. **Re-extract with OCR** explicitly retries all pages and replaces the current extraction and edits.
+- **Visual verification is on by default**, including pages with usable embedded text. Two OCR passes (3× uniform layout, 4× sparse layout) independently read the rendered page. Long ruling strokes are removed from OCR copies. Detected narrow cells are additionally read from untouched source crops; agreed ruling geometry keeps narrow columns separate.
+- Embedded text and both visual readings are matched by physical region. Two identical readings with minimum word confidence 85 can recover absent text or correct embedded OCR; a length-completeness guard rejects truncating corrections. A PDF value is retained when evidence conflicts. No spelling dictionary or numerical guessing is used.
+- Unconfirmed OCR-only candidates on text pages remain in the report instead of being inserted as extra spreadsheet values. On image-only pages, uncertain readings remain visible. Every region's original and alternate readings are retained.
+- Uncheck **Verify and repair using two visual OCR passes** for fast extraction (OCR still handles pages with no text). **Recheck and repair** reruns visual verification and replaces edits.
 
 ## Verification and limits
 
-The pipeline compares token multiplicities from all extracted fragments against the reconstructed grid. Missing or duplicated tokens stop conversion instead of producing a silently incomplete workbook. The result lists uncertain rows, OCR use, and pages with no recovered text. These checks describe the initial extraction; deliberate edits are exported as entered.
+The pipeline compares token multiplicities from the selected/reconciled fragments against the reconstructed grid. Reconciliation separately retains evidence for every input fragment, including alternate readings not selected. Missing or duplicated tokens stop conversion instead of producing a silently incomplete workbook. The result lists uncertain rows, OCR use, and pages with no recovered text. These checks describe the initial extraction; deliberate edits are exported as entered.
 
 **This is a preservation check, not proof of PDF accuracy.** PDF files do not reliably encode table structure. An existing text layer may omit visible text or contain incorrect OCR; recognition may also misread scans. Values spanning columns, missing labels, merged cells, mixed layouts and wrapped rows need source review. Blank pages and unreadable pages cannot always be distinguished automatically. No general PDF converter can guarantee zero errors.
 
-The included Siemens PDFs demonstrate this distinction: they contain embedded text layers even though they look scanned, and some visible UM labels/values are absent from those layers. Use the OCR retry and compare the result with the PDF; missing text is never invented automatically.
+The included Siemens PDFs have incomplete embedded text layers. The default visual check now attempts recovery automatically, without inventing absent values. The result summary distinguishes automatic recoveries, corrections, agreements, unresolved regions and failed passes. Download the JSON verification report to inspect all original and alternate readings. Reports describe the extraction before manual edits.
 
 ## Spreadsheet editor
 
@@ -55,14 +58,17 @@ The dependency-free Node tests cover heading and missing-cell alignment, duplica
 
 An optional browser regression script is in `tests/browser.mjs`. With Playwright installed and the app served locally, run `node tests/browser.mjs`. Set `PLAYWRIGHT_MODULE` to an absolute Playwright module path if needed; `TEST_BASE_URL` defaults to localhost port 8080. It uses the included 32-page PDF and writes QA screenshots and a workbook to the system temporary directory.
 
-Additional development checks ran the pinned PDF.js build against both included documents (60 pages, 22,678 source fragments), with zero token loss or duplication. Browser checks cover conversion, editing, undo/redo, row/column insertion, pagination, PDF comparison, modal close/reopen, mobile layout and a downloaded XLSX round trip. This does not certify every source value or constitute an OCR accuracy benchmark.
+Additional development checks ran the pinned PDF.js build against both included documents (60 pages, 22,678 source fragments), with zero token loss or duplication. Browser checks cover conversion, editing, undo/redo, row/column insertion, pagination, PDF comparison, modal close/reopen, mobile layout and a downloaded XLSX round trip. Real two-pass OCR was also run on the first page of each included document. It recovered 17 absent regions and selected 12 corrections, with no selected-text loss or duplication in reconstruction. These are automated decisions, not a ground-truth accuracy benchmark; unresolved readings remain reported.
 
 ## Modules
 
 - `pdf-parser.js`: loading, normalized coordinates, rendering and cleanup.
 - `ocr.js`: worker lifecycle and retained word boxes.
 - `table-detector.js`: physical rows, columns, sections and source-order combination.
-- `validation.js`: extracted-token preservation checks.
+- `validation.js`: selected-token preservation checks.
+- `page-verifier.js`: sequential visual passes, narrow-cell retries and cancellation.
+- `ocr-preprocess.js`: ruling detection and removal from OCR copies.
+- `reconciliation.js`: spatial agreement, recovery, corrections and retained evidence.
 - `table-cleaner.js`: whitespace normalization.
 - `editor.js`: spreadsheet modal and PDF comparison.
 - `ui.js`: read-only result preview and status.
