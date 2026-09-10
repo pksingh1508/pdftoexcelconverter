@@ -420,6 +420,21 @@ export function detectTablesOnPage(items, pageNumber) {
       (frequency.get(b.cells.length) - frequency.get(a.cells.length)) ||
       b.cells.reduce((n, c) => n + c.x1 - c.x0, 0) - a.cells.reduce((n, c) => n + c.x1 - c.x0, 0));
     const columns = buildBlockColumns(modelRows);
+    // Fuse offset heading/body spans only when no source row demonstrates
+    // that they are separate cells (protects adjacent numeric columns).
+    for (let a = 0; a < columns.length; a++) {
+      for (let b = a + 1; b < columns.length; b++) {
+        const overlap = Math.min(columns[a].x1, columns[b].x1) - Math.max(columns[a].x0, columns[b].x0);
+        if (overlap <= 0) continue;
+        const coexist = block.some(row => {
+          const hits = row.cells.map(cell => findColumn(cell, columns));
+          return hits.includes(a) && hits.includes(b);
+        });
+        if (coexist) continue;
+        columns[a] = { x0: Math.min(columns[a].x0, columns[b].x0), x1: Math.max(columns[a].x1, columns[b].x1) };
+        columns.splice(b--, 1);
+      }
+    }
     columns.sort((a, b) => a.x0 - b.x0);
     const issues = [];
     const grid = block.map((row, r) => {
@@ -464,7 +479,7 @@ export function detectTablesOnPage(items, pageNumber) {
     const source = items[0].source || 'pdf-text';
     const confidence = fallback ? 0.25 : scoreTable(grid, { source });
     return { id: `p${pageNumber}-t${index + 1}`, pageNumbers: [pageNumber],
-      y: block[0].y, rows: normalizeGrid(grid), source, confidence,
+      y: block[0].y, columns, rows: normalizeGrid(grid), source, confidence,
       confidenceLabel: confidenceLabel(confidence), fallback, issues,
       rowOrigins: block.map(r => ({ page: pageNumber, y: r.y })),
       // Only style a plausible heading; never invent or replace labels.
@@ -768,6 +783,23 @@ export function mergeSameHeaderTables(tables) {
 export function combineTables(tables) {
   const ordered = [...tables].sort((a, b) =>
     (a.pageNumbers?.[0] || 0) - (b.pageNumbers?.[0] || 0) || (a.y || 0) - (b.y || 0));
+  // Repeated physical templates may have an entirely missing column on a
+  // page. Insert blanks from a wider matching template, never shuffle values.
+  const signature = t => t.headerRows?.length ? t.rows[t.headerRows[0]].filter(Boolean).join('\u0000') : '';
+  for (let i = 0; i < ordered.length; i++) {
+    const t = ordered[i];
+    if (!t.columns || !signature(t)) continue;
+    const model = ordered.filter(other => other.columns && signature(other) === signature(t))
+      .sort((a, b) => b.columns.length - a.columns.length)[0];
+    if (!model || model.columns.length <= t.columns.length) continue;
+    const mapping = t.columns.map(c => findColumn(c, model.columns));
+    if (mapping.some((c, j) => c < 0 || (j > 0 && c <= mapping[j - 1]))) continue;
+    ordered[i] = { ...t, rows: t.rows.map(row => {
+      const result = Array(model.columns.length).fill('');
+      row.forEach((v, c) => { result[mapping[c]] = v; });
+      return result;
+    }), issues: [...t.issues, { row: 0, message: 'Blank column preserved from a matching physical table layout; check missing source text.' }] };
+  }
   const width = ordered.reduce((w, t) => Math.max(w, ...t.rows.map(r => r.length)), 0);
   const rows = [], sources = [], rowOrigins = [], headerRows = [], issues = [];
   const pages = new Set();

@@ -76,6 +76,7 @@ async function init() {
   configurePdfWorker();
   editor = createEditor({ getData: () => state.combined,
     onEdit: () => { state.dirty = true; renderCombined(); }, onDownload: handleDownload });
+  $('retryOcrBtn').addEventListener('click', () => convert(true));
   $('editBtn').addEventListener('click', () => editor.open(state.file));
 
   // Upload wiring
