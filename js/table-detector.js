@@ -389,166 +389,89 @@ function isProseRow(row) {
  * @returns {Array<{id:string, pageNumbers:number[], confidence:number, confidenceLabel:string, rows:string[][], source:string}>}
  */
 export function detectTablesOnPage(items, pageNumber) {
-  if (!items || !items.length) return [];
-
-  const rows = groupIntoRows(items);
-  if (!rows.length) return [];
-  const medGap = medianGap(rows);
-
-  // ---- Step 1: words -> cells, then split rows into blocks ----
-  const rowCells = rows.map((r) => ({ y: r.y, cells: splitRowIntoCells(r.items) }));
-
-  /** @type {Array<Array<{y:number, cells:Cell[]}>>} */
+  if (!items?.length) return [];
+  const rows = groupIntoRows(items).map(r => ({
+    ...r, cells: splitRowIntoCells(r.items),
+  }));
+  const gap = medianGap(rows);
   const blocks = [];
-  let current = [];
-  const flushBlock = () => {
-    if (current.length) blocks.push(current);
-    current = [];
-  };
-
-  /** Median dense-row cell count of the open block (its column structure). */
-  const blockWidthMedian = () => {
-    const ns = current.filter((r) => r.cells.length >= 2).map((r) => r.cells.length);
-    if (!ns.length) return 0;
-    return median(ns);
-  };
-
-  /** Longest cell text among the block's last few dense rows. */
-  const recentMaxCellLen = () => {
-    const ds = current.filter((r) => r.cells.length >= 2).slice(-3);
-    let m = 0;
-    for (const r of ds) for (const c of r.cells) m = Math.max(m, c.text.length);
-    return m;
-  };
-
-  for (let i = 0; i < rowCells.length; i++) {
-    const row = rowCells[i];
-    const gap = rowGap(rowCells, i);
-    const dense = row.cells.length >= 2;
-
-    if (i > 0 && gap > medGap * CONFIG.TABLE_GAP_MULTIPLIER && current.length) {
-      flushBlock();
+  let block = [];
+  for (const row of rows) {
+    const likelyHeading = row.cells.length >= CONFIG.HEADER_MIN_CELLS &&
+      row.cells.every(c => c.text.length <= CONFIG.HEADER_MAX_LABEL_LENGTH && /[A-Za-z]/.test(c.text)) &&
+      block.some(r => r.cells.some(c => c.text.length > CONFIG.HEADER_MAX_LABEL_LENGTH));
+    if (block.length && (row.y - block.at(-1).y > gap * CONFIG.TABLE_GAP_MULTIPLIER || likelyHeading)) {
+      blocks.push(block);
+      block = [];
     }
-
-    if (dense) {
-      if (isProseRow(row)) {
-        if (current.length) flushBlock();
-        continue;
-      }
-      // A header row starting the data table ends the letterhead zone:
-      // short labels ("LINE", "QTY") after long address phrases, with at
-      // least as many columns. Data rows always carry a long cell, so they
-      // never trigger this.
-      const maxLen = Math.max(...row.cells.map((c) => c.text.length));
-      const med = blockWidthMedian();
-      if (
-        current.length >= 2 &&
-        row.cells.length >= 4 &&
-        maxLen <= 14 &&
-        recentMaxCellLen() >= 25 &&
-        row.cells.length >= med
-      ) {
-        flushBlock();
-      }
-      // Sustained column-structure change ends the block: e.g. a 3-column
-      // letterhead zone followed by a 7-column packing list. A single odd
-      // row (missing cells, subtotal) must NOT split — so require the new
-      // pattern to persist into the next dense row (lookahead).
-      else if (current.length >= 2 && med > 0 && Math.abs(row.cells.length - med) >= 3) {
-        const nextDense = findNextDense(rowCells, i);
-        if (nextDense && Math.abs(nextDense.cells.length - med) >= 3) {
-          flushBlock();
-        }
-      }
-      current.push(row);
-    } else if (current.length > 0) {
-      // Sparse row inside an open block: possible title / missing values /
-      // wrapped line. Long prose ends the block.
-      const words = row.cells.map((c) => c.text).join(' ').trim().split(/\s+/).filter(Boolean);
-      if (words.length > 16) flushBlock();
-      else current.push(row);
-    }
+    block.push(row);
   }
-  flushBlock();
+  if (block.length) blocks.push(block);
 
-  // ---- Step 2: per-block columns + grid + score ----
-  const source = items[0] && items[0].source ? items[0].source : 'pdf-text';
-  let tables = [];
-  let tableIdx = 0;
-
-  for (const block of blocks) {
-    const denseCount = block.filter((r) => r.cells.length >= 2).length;
-    if (block.length < CONFIG.MIN_TABLE_ROWS || denseCount < CONFIG.MIN_TABLE_ROWS) continue;
-
-    let columns = buildBlockColumns(block);
-    // Fuse duplicate/contained intervals (builder races, header remnants,
-    // text splinters) back into their logical column.
-    columns = mergeOverlappingColumns(columns);
-    if (columns.length < CONFIG.MIN_TABLE_COLUMNS) continue;
-
-    const grid = mapBlockToGrid(block, columns);
-    const blockGap = medianGap(block);
-
-    // Merge wrapped/continuation lines: a single-FRAGMENT row sitting close
-    // below a table row folds into the overlapping cell above instead of
-    // becoming its own row. The overlap requirement is critical: without
-    // it, standalone lines (e.g. "SIEMENS" under a right-aligned title)
-    // glue onto unrelated cells and inflate junk-block scores.
-    /** @type {string[][]} */
-    const mergedGrid = [];
-    for (let i = 0; i < grid.length; i++) {
-      const g = grid[i];
-      const filled = nonEmptyCount(g);
-      const gap = i > 0 ? Math.abs(block[i].y - block[i - 1].y) : 0;
-      const srcCells = block[i].cells;
-      if (
-        i > 0 &&
-        filled === 1 &&
-        srcCells.length === 1 &&
-        gap > 0 &&
-        gap < blockGap * 1.4 &&
-        mergedGrid.length
-      ) {
-        const prev = mergedGrid[mergedGrid.length - 1];
-        const idx = g.findIndex((c) => String(c).trim() !== '');
-        const frag = srcCells[0];
-        const col = columns[idx];
-        const overlaps =
-          col && Math.min(frag.x1, col.x1) - Math.max(frag.x0, col.x0) > 0;
-        if (overlaps && String(prev[idx] || '').trim()) {
-          prev[idx] = `${prev[idx]} ${g[idx]}`.trim();
-          continue;
+  return blocks.map((block, index) => {
+    // Start with the densest physical row, not a spanning title/header.
+    // Never let a wide header expand a column over its neighbours.
+    const seed = block.reduce((a, b) => b.cells.length > a.cells.length ? b : a);
+    // Repeated body shapes establish spans before short, centred headings.
+    // This lets a description's full extent absorb its split word fragments.
+    const frequency = new Map();
+    for (const row of block) frequency.set(row.cells.length, (frequency.get(row.cells.length) || 0) + 1);
+    const modelRows = [...block].sort((a, b) =>
+      (frequency.get(b.cells.length) - frequency.get(a.cells.length)) ||
+      b.cells.reduce((n, c) => n + c.x1 - c.x0, 0) - a.cells.reduce((n, c) => n + c.x1 - c.x0, 0));
+    const columns = buildBlockColumns(modelRows);
+    columns.sort((a, b) => a.x0 - b.x0);
+    const issues = [];
+    const grid = block.map((row, r) => {
+      const out = Array(columns.length).fill('');
+      let previous = -1;
+      for (const cell of row.cells) {
+        const candidates = columns.map((c, i) => ({ c, i,
+          overlap: Math.max(0, Math.min(c.x1, cell.x1) - Math.max(c.x0, cell.x0)),
+        })).filter(c => c.overlap > 0);
+        // Monotonic assignment preserves left-to-right order and never
+        // concatenates two distinct cells into one column.
+        const available = candidates.filter(c => c.i >= previous);
+        available.sort((a, b) =>
+          Math.abs(a.c.x0 - cell.x0) - Math.abs(b.c.x0 - cell.x0));
+        let hit = available[0]?.i;
+        if (hit === undefined) {
+          // Recover a conflicting row without losing a value. Flag it;
+          // do not silently guess a neighbouring cell.
+          issues.push({ row: r, message: 'Conflicting column positions; compare this row with the PDF.' });
+          return row.cells.map(c => c.text);
         }
+        if (candidates.length > 1) issues.push({ row: r, column: hit,
+          message: 'Text spans multiple column positions; check the heading or value alignment.' });
+        out[hit] = out[hit] ? `${out[hit]} ${cell.text}` : cell.text;
+        previous = hit;
       }
-      mergedGrid.push([...g]);
-    }
-
-    if (mergedGrid.length < CONFIG.MIN_TABLE_ROWS) continue;
-    // Drop near-empty artifact columns (header unnamed + rarely filled):
-    // stray text splinters that split off their real column rejoin the
-    // nearest kept neighbor instead of shifting the whole table.
-    const deduped = dropSparseColumns(trimEmptyEdges(normalizeGrid(mergedGrid)));
-    const normalized = deduped.filter((r) => r.some((c) => String(c).trim() !== ''));
-    if (!normalized.length) continue;
-    const multiRows = normalized.filter((r) => nonEmptyCount(r) >= 2).length;
-    if (multiRows < CONFIG.MIN_TABLE_ROWS) continue;
-
-    const score = scoreTable(normalized, { source });
-    tableIdx++;
-    tables.push({
-      id: `p${pageNumber}-t${tableIdx}`,
-      pageNumbers: [pageNumber],
-      confidence: round2(score),
-      confidenceLabel: confidenceLabel(score),
-      rows: normalized,
-      source,
+      return out;
     });
-  }
-
-  // ---- Step 3: drop letterhead fragments next to a strong main table ----
-  tables = filterMinorTables(tables);
-
-  return tables.map((t, i) => ({ ...t, id: `p${pageNumber}-t${i + 1}` }));
+    const fallback = seed.cells.length < CONFIG.MIN_TABLE_COLUMNS || block.length < CONFIG.MIN_TABLE_ROWS;
+    if (fallback) issues.push({ row: 0, message: 'Uncertain table structure: original text retained for review.' });
+    // A sparse physical line might be a wrapped cell OR a new record.
+    // Keep it as its own row instead of irreversibly joining records.
+    block.forEach((r, i) => {
+      if (!fallback && r.cells.length < seed.cells.length) issues.push({ row: i,
+        message: 'Sparse or wrapped row; check blank cells and multi-line headings.' });
+    });
+    for (let r = 0; r < block.length; r++) {
+      if (block[r].items.some(it => it.source === 'ocr')) issues.push({ row: r,
+        message: 'OCR text requires comparison with the source PDF.',
+        lowConfidence: block[r].items.some(it => it.confidence < CONFIG.MIN_OCR_CONFIDENCE) });
+    }
+    const source = items[0].source || 'pdf-text';
+    const confidence = fallback ? 0.25 : scoreTable(grid, { source });
+    return { id: `p${pageNumber}-t${index + 1}`, pageNumbers: [pageNumber],
+      y: block[0].y, rows: normalizeGrid(grid), source, confidence,
+      confidenceLabel: confidenceLabel(confidence), fallback, issues,
+      rowOrigins: block.map(r => ({ page: pageNumber, y: r.y })),
+      // Only style a plausible heading; never invent or replace labels.
+      headerRows: !fallback && block[0].cells.length >= 2 &&
+        block[0].cells.every(c => !/^[\d\s.,+%$₹€£()-]+$/.test(c.text)) ? [0] : [],
+    };
+  });
 }
 
 /**
@@ -843,107 +766,22 @@ export function mergeSameHeaderTables(tables) {
  * @returns {{rows:string[][], header:string[], sources:Array, pageCount:number}}
  */
 export function combineTables(tables) {
-  if (!tables.length) return { rows: [], header: [], sources: [], pageCount: 0 };
-  // Union source = LONGEST header (most rows breaks ties). A narrow table
-  // missing labels must never define the union: otherwise wider tables'
-  // labeled columns (e.g. UM) cannot align and silently shift.
-  const main = [...tables].sort(
-    (a, b) => b.rows[0].length - a.rows[0].length || b.rows.length - a.rows.length
-  )[0];
-  const union = main.rows[0].slice();
-  const adopted = union.slice();
-  // Per-slot label votes. Every table's header row votes once, so a
-  // one-page glitch label (e.g. I-JM for UM) can never outvote a label the
-  // rest of the document agrees on. Empty labels never vote. Ties keep the
-  // earliest (leftmost-table) label.
-  const votes = union.map(() => new Map());
-  const growUnion = (label) => {
-    union.push(label || '');
-    adopted.push(label || '');
-    votes.push(new Map());
-    return union.length - 1;
-  };
-
-  // Pass 1: align every table to the union via shared labels. Leftovers
-  // pair positionally ONLY for same-width tables whose labels mostly match
-  // (same physical template with a renamed/missing label, e.g. UM/glitch
-  // variants) — everything else EXTENDS the union visibly. Nothing is ever
-  // squeezed into a wrong slot and nothing is ever dropped.
-  // Header labels are decided by majority vote per slot at the end, so a
-  // one-page glitch label can never rename a column the rest call UM.
-  const plans = tables.map((t) => {
-    const head = t.rows[0];
-    const map = mapColumnsToUnion(head, union);
-    const matched = map.filter((m) => m !== -1).length;
-    if (head.length === union.length && matched / head.length >= 0.5) {
-      const freeU = union.map((_, u) => u).filter((u) => !map.includes(u));
-      const leftover = head.map((_, c) => c).filter((c) => map[c] === -1);
-      leftover.forEach((c, k) => {
-        if (k < freeU.length) map[c] = freeU[k];
-      });
-    }
-    head.forEach((h, c) => {
-      if (map[c] !== -1) return;
-      map[c] = growUnion(h || '');
-    });
-    return { t, map, aligned: true };
-  });
-
-  // Pass 2: emit rows in original (page) order. Row order is sacred: the
-  // sheet must read top-to-bottom exactly like the PDF.
-  /** @type {string[][]} */
-  const rows = [];
-  const sources = [];
+  const ordered = [...tables].sort((a, b) =>
+    (a.pageNumbers?.[0] || 0) - (b.pageNumbers?.[0] || 0) || (a.y || 0) - (b.y || 0));
+  const width = ordered.reduce((w, t) => Math.max(w, ...t.rows.map(r => r.length)), 0);
+  const rows = [], sources = [], rowOrigins = [], headerRows = [], issues = [];
   const pages = new Set();
-  plans.forEach(({ t, map, aligned }, ti) => {
-    for (const p of t.pageNumbers || []) pages.add(p);
-    if (ti > 0) rows.push(new Array(union.length).fill(''));
+  for (const t of ordered) {
     const startRow = rows.length;
-    t.rows.forEach((r, ri) => {
-      const nr = new Array(union.length).fill('');
-      r.forEach((val, c) => {
-        let u = map[c];
-        if (u === undefined || u === null || u < 0) {
-          // Safety net: grow, never drop and never misplace.
-          u = growUnion('');
-        }
-        while (nr.length <= u) nr.push('');
-        if (ri === 0) {
-          const v = String(val || '').trim();
-          if (v) votes[u].set(v, (votes[u].get(v) || 0) + 1);
-        }
-        nr[u] = nr[u] ? `${nr[u]} ${val}`.trim() : val;
-      });
-      rows.push(nr);
-    });
-    sources.push({
-      id: t.id,
-      pages: [...(t.pageNumbers || [])],
-      startRow,
-      rowCount: t.rows.length,
-      confidence: t.confidence,
-      aligned,
-    });
-  });
-
-  // Pad every row to the final width (union may have grown during emit).
-  rows.forEach((r) => {
-    while (r.length < union.length) r.push('');
-  });
-  // Final header = majority vote per slot (ties keep the earliest label).
-  for (let u = 0; u < union.length; u++) {
-    let bestLabel = '';
-    let bestVotes = 0;
-    for (const [label, count] of votes[u]) {
-      if (count > bestVotes) {
-        bestVotes = count;
-        bestLabel = label;
-      }
-    }
-    adopted[u] = bestLabel;
+    for (const p of t.pageNumbers || []) pages.add(p);
+    for (const row of t.rows) rows.push([...row, ...Array(width - row.length).fill('')]);
+    rowOrigins.push(...(t.rowOrigins || t.rows.map(() => ({ page: t.pageNumbers[0] }))));
+    headerRows.push(...(t.headerRows || []).map(r => startRow + r));
+    issues.push(...(t.issues || []).map(i => ({ ...i, row: startRow + i.row, page: t.pageNumbers[0] })));
+    sources.push({ id: t.id, pages: t.pageNumbers, startRow, rowCount: t.rows.length, confidence: t.confidence });
   }
-  if (rows.length) rows[0] = adopted.slice();
-  return { rows, header: adopted.slice(), sources, pageCount: pages.size };
+  return { rows, header: rows[0]?.slice() || [], sources, pageCount: pages.size,
+    rowOrigins, headerRows, issues };
 }
 
 /**
@@ -981,31 +819,9 @@ export function mapRowsToColumns(rows, colCenters) {
  */
 export function buildFallbackTable(allItems) {
   if (!allItems.length) return null;
-  const byPage = new Map();
-  for (const it of allItems) {
-    if (!byPage.has(it.page)) byPage.set(it.page, []);
-    byPage.get(it.page).push(it);
-  }
-  const firstPage = [...byPage.keys()].sort((a, b) => a - b)[0];
-  const items = byPage.get(firstPage);
-  const rows = groupIntoRows(items);
-  const xStarts = [];
-  for (const r of rows) for (const it of r.items) xStarts.push(it.x);
-  let centers = clusterXPositions(xStarts, CONFIG.COLUMN_X_TOLERANCE * 1.75);
-  if (centers.length < 1) centers = [median(xStarts)];
-  // Cap fallback width so prose doesn't become a 12-column mess.
-  if (centers.length > 6) {
-    centers = clusterXPositions(xStarts, CONFIG.COLUMN_X_TOLERANCE * 3);
-  }
-  const grid = trimEmptyEdges(normalizeGrid(mapRowsToColumns(rows, centers)));
-  if (!grid.length) return null;
-  return {
-    id: 'table-1',
-    pageNumbers: [firstPage],
-    confidence: 0.25,
-    confidenceLabel: 'Low confidence',
-    rows: grid,
-    source: items[0].source || 'pdf-text',
-    fallback: true,
-  };
+  const pages = [...new Set(allItems.map(it => it.page))].sort((a, b) => a - b);
+  const tables = pages.flatMap(p => detectTablesOnPage(allItems.filter(it => it.page === p), p));
+  const combined = combineTables(tables);
+  return { ...combined, id: 'recovered-text', pageNumbers: pages, confidence: 0.25,
+    confidenceLabel: 'Low confidence', source: allItems[0].source, fallback: true };
 }

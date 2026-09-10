@@ -86,10 +86,11 @@ export async function extractPageTextItems(pdf, pageNumber) {
       if (!str) continue;
       // transform = [scaleX, skewY, skewX, scaleY, x, y] in PDF (bottom-left origin) units.
       const t = raw.transform || [1, 0, 0, 1, 0, 0];
-      const x = t[4];
+      const transformed = getPdfJs().Util.transform(viewport.transform, t);
+      const x = transformed[4];
       // Normalize to top-left origin so OCR + PDF share one coordinate system.
       const yBottom = t[5];
-      const y = pageHeight - yBottom;
+      const y = transformed[5] - Math.abs(raw.height || t[0] || 10);
       const height = Math.abs(raw.height || t[0] || 10) || 10;
       const width = Math.abs(raw.width || str.length * (height * 0.55)) || 10;
       items.push({

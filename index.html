@@ -114,6 +114,7 @@
               <p class="muted" id="resultSubtitle"></p>
             </div>
             <div class="result-actions">
+              <button type="button" class="btn btn-secondary" id="editBtn">Edit spreadsheet</button>
               <button type="button" class="btn btn-primary" id="downloadBtn">Download Excel</button>
               <button type="button" class="btn btn-secondary" id="convertAnotherBtn">Convert Another PDF</button>
             </div>
@@ -134,19 +135,22 @@
             </div>
           </div>
 
+          <details class="validation-panel" open>
+            <summary>Extraction checks &amp; review</summary>
+            <p id="validationSummary" role="status"></p>
+            <ul id="validationIssues"></ul>
+          </details>
           <div id="tablesWrap">
             <div class="table-toolbar">
               <span class="confidence-pill" id="confidencePill"></span>
               <span class="muted small" id="tableMeta"></span>
               <span class="spacer"></span>
-              <button type="button" class="btn btn-ghost btn-small" id="addRowBtn">+ Row</button>
-              <button type="button" class="btn btn-ghost btn-small" id="addColBtn">+ Column</button>
-              <button type="button" class="btn btn-ghost btn-small" id="delColBtn">− Column</button>
+
             </div>
             <div class="table-scroll">
               <table id="previewTable" aria-label="Extracted table preview"></table>
             </div>
-            <p class="muted small preview-hint">All pages merged into one table below — click any cell to edit. The Excel file contains exactly this data. <button type="button" class="link-btn" id="showAllRowsBtn">Show all rows</button></p>
+            <p class="muted small preview-hint">Rows and columns stay in source order, including repeated headings. Use Edit spreadsheet to review and change any cell. <button type="button" class="link-btn" id="showAllRowsBtn">Show all rows</button></p>
           </div>
           <p class="error-text hidden" id="exportError" role="alert"></p>
         </div>
@@ -186,6 +190,29 @@
     </div>
   </footer>
 
+  <dialog id="editorDialog" aria-labelledby="editorTitle">
+    <div class="editor-shell">
+      <header class="editor-header">
+        <div><h2 id="editorTitle">Edit spreadsheet</h2><p id="editorFilename" class="muted small"></p></div>
+        <div class="result-actions"><button class="btn btn-primary" id="editorDownload">Download Excel</button><button class="btn btn-secondary" id="closeEditor">Done</button></div>
+      </header>
+      <div class="editor-toolbar" aria-label="Spreadsheet tools">
+        <button class="btn btn-small btn-secondary" id="undoEdit">Undo</button><button class="btn btn-small btn-secondary" id="redoEdit">Redo</button>
+        <button class="btn btn-small btn-secondary" id="insertRow">Insert row below</button><button class="btn btn-small btn-secondary" id="insertColumn">Insert column right</button>
+        <button class="btn btn-small btn-ghost" id="deleteRow">Delete row</button><button class="btn btn-small btn-ghost" id="deleteColumn">Delete column</button>
+        <button class="btn btn-small btn-secondary" id="toggleHeading">Mark as heading</button>
+        <button class="btn btn-small btn-secondary" id="nextIssue">Next issue</button>
+        <button class="btn btn-small btn-secondary" id="showSource" aria-expanded="false" aria-controls="sourcePane">Compare with PDF</button>
+      </div>
+      <div class="formula-bar"><output id="cellAddress">A1</output><label for="cellValue">Cell value</label><textarea id="cellValue" rows="2" spellcheck="false"></textarea><span id="cellSource" class="small muted"></span></div>
+      <div class="editor-workspace">
+        <div class="editor-grid-scroll"><table id="editorGrid" aria-label="Editable spreadsheet"></table></div>
+        <aside id="sourcePane" class="hidden"><a id="sourceLink" target="_blank" rel="noopener">Open original PDF in a new tab</a><iframe id="sourcePdf" title="Original PDF for comparison"></iframe></aside>
+      </div>
+      <footer class="editor-footer"><span id="editorRange"></span><label>Go to row <input id="goToRow" type="number" min="1" value="1"></label><button class="btn btn-small btn-secondary" id="previousRows">Previous rows</button><button class="btn btn-small btn-secondary" id="nextRows">Next rows</button><span class="muted small">Changes save automatically · Tab / Enter to navigate · Shift+Enter for a line break</span></footer>
+    </div>
+  </dialog>
+
   <div id="toast" class="toast hidden" role="alert" aria-live="assertive"></div>
   <canvas id="ocrCanvas" class="hidden" aria-hidden="true"></canvas>
 
@@ -196,6 +223,6 @@
        styles on write, so this fork is required for formatted output. -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.0.5/dist/tesseract.min.js"></script>
-  <script type="module" src="./js/app.js?v=3"></script>
+  <script type="module" src="./js/app.js?v=4"></script>
 </body>
 </html>

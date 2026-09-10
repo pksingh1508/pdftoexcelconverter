@@ -8,6 +8,10 @@
 /** @type {object} Extraction + UX tuning */
 export const CONFIG = {
   MAX_FILE_SIZE_MB: 50,
+  HEADER_MIN_CELLS: 4,
+  HEADER_MAX_LABEL_LENGTH: 24,
+  EDITOR_PAGE_SIZE: 100,
+  EDITOR_UNDO_LIMIT: 30,
 
   // Row grouping: items whose Y centers differ by <= this are the same row.
   // PDF units (points at scale 1). Adaptive logic widens it for large fonts.
@@ -28,7 +32,7 @@ export const CONFIG = {
   // Canvas render scale for OCR pages (higher = better accuracy, more memory).
   OCR_SCALE: 2,
 
-  // Tesseract word confidence below this is dropped (0-100).
+  // Tesseract word confidence below this is flagged for review (0-100).
   MIN_OCR_CONFIDENCE: 40,
 
   // Table splitting: a vertical gap larger than median * this ends a table.

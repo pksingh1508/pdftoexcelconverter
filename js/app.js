@@ -1,3 +1,5 @@
+import { auditExtraction } from './validation.js';
+import { createEditor } from './editor.js';
 /**
  * Application orchestrator: file intake -> PDF.js extraction -> (OCR fallback)
  * -> table detection -> editable preview -> SheetJS export.
@@ -16,8 +18,6 @@ import {
 } from './pdf-parser.js';
 import {
   detectTablesOnPage,
-  mergeContinuedTables,
-  mergeSameHeaderTables,
   combineTables,
   buildFallbackTable,
 } from './table-detector.js';
@@ -65,13 +65,18 @@ function friendlyError(err) {
   if (err && /ocr/i.test(String((err && err.message) || ''))) {
     return `OCR failed: ${(err && err.message) || err}. Try a text-based PDF or fewer scanned pages.`;
   }
-  return "We couldn't read this PDF. It may be corrupted or password-protected.";
+  return err?.message || "We couldn't read this PDF. Please try another file.";
 }
+
+let editor;
 
 async function init() {
   cacheElements();
   const els = getEls();
   configurePdfWorker();
+  editor = createEditor({ getData: () => state.combined,
+    onEdit: () => { state.dirty = true; renderCombined(); }, onDownload: handleDownload });
+  $('editBtn').addEventListener('click', () => editor.open(state.file));
 
   // Upload wiring
   els.chooseBtn.addEventListener('click', (e) => {
@@ -151,34 +156,6 @@ async function init() {
     state.showAllRows = !state.showAllRows;
     renderCombined();
   });
-  els.addRowBtn.addEventListener('click', () => {
-    const c = state.combined;
-    if (!c || !c.rows.length) return;
-    const cols = c.rows[0] ? c.rows[0].length : 1;
-    c.rows.push(new Array(cols).fill(''));
-    state.showAllRows = true;
-    state.dirty = true;
-    renderCombined();
-  });
-  els.addColBtn.addEventListener('click', () => {
-    const c = state.combined;
-    if (!c || !c.rows.length) return;
-    for (const row of c.rows) row.push('');
-    state.dirty = true;
-    renderCombined();
-  });
-  els.delColBtn.addEventListener('click', () => {
-    const c = state.combined;
-    if (!c || !c.rows.length) return;
-    const width = Math.max(...c.rows.map((r) => r.length));
-    if (width <= 1) {
-      toast('A table needs at least one column.');
-      return;
-    }
-    for (const row of c.rows) row.splice(width - 1, 1);
-    state.dirty = true;
-    renderCombined();
-  });
 
   showView('upload');
   showResult(false);
@@ -209,6 +186,8 @@ async function handleFile(file) {
     toast(`File is too large (max ${CONFIG.MAX_FILE_SIZE_MB} MB).`);
     return;
   }
+  editor.reset();
+  state.pdf?.destroy();
   state.file = file;
   state.pdf = null;
   state.pageCount = 0;
@@ -231,6 +210,8 @@ async function handleFile(file) {
 }
 
 function resetFile() {
+  editor.reset();
+  state.pdf?.destroy();
   state.file = null;
   state.pdf = null;
   state.pageCount = 0;
@@ -264,6 +245,8 @@ async function convert(forceOcr) {
   state.cancelled = false;
   state.forceOcr = forceOcr;
   state.showAllRows = false;
+  state.dirty = false;
+  editor.reset();
   const exportErr = $('exportError');
   if (exportErr) exportErr.classList.add('hidden');
 
@@ -334,15 +317,6 @@ async function convert(forceOcr) {
     setProgress(94, 'Cleaning data', '');
     await nextFrame();
 
-    tables = mergeContinuedTables(tables);
-    // Merge same-heading tables wherever they repeat, so the sheet holds
-    // ONE heading at the top and all data below it.
-    tables = mergeSameHeaderTables(tables);
-    // Re-title after merge so names stay sequential.
-    tables.forEach((t, i) => {
-      t.title = `Table ${i + 1} - Page ${t.pageNumbers.join(',')}`;
-    });
-
     let fallback = null;
     if (!tables.length && allItems.length) {
       fallback = buildFallbackTable(allItems);
@@ -361,13 +335,15 @@ async function convert(forceOcr) {
       .join(' ')
       .replace(/\s+/g, ' ')
       .trim()
-      .slice(0, 20000);
+;
 
     state.tables = tables;
     state.ocrUsed = ocrUsed;
     // Merge continuations, then combine EVERYTHING into one dataset:
     // a single preview grid and a single-sheet Excel download.
     state.combined = combineTables(tables);
+    state.audit = auditExtraction(allItems, state.combined, pageCount);
+    if (!state.audit.passed) throw new Error('Integrity check failed: extracted text was lost or duplicated during reconstruction.');
 
     setProgress(97, 'Preparing preview', '');
     await nextFrame();
@@ -445,7 +421,10 @@ function showTables() {
   $('tablesWrap').classList.remove('hidden');
 
   const c = state.combined;
-  $('resultTitle').textContent = 'Table extracted — ready to download';
+  $('resultTitle').textContent = 'Extraction complete — review your data';
+  $('editBtn').disabled = false;
+  $('downloadBtn').disabled = false;
+  renderValidation();
   $('resultSubtitle').textContent =
     `${state.file ? state.file.name : ''}${state.ocrUsed ? ' • OCR was used for scanned pages' : ''} — review, edit, then download one Excel file.`;
 
@@ -463,6 +442,9 @@ function showNoTables() {
   $('tablesWrap').classList.add('hidden');
   $('noTablesState').classList.remove('hidden');
   $('resultTitle').textContent = 'No tables found';
+  $('editBtn').disabled = true;
+  $('downloadBtn').disabled = true;
+  renderValidation();
   $('resultSubtitle').textContent = state.file ? state.file.name : '';
   $('rawTextWrap').classList.add('hidden');
   $('resultCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -489,6 +471,7 @@ function renderCombined() {
   const c = state.combined;
   if (!c || !c.rows.length) return;
   setCombinedMeta(c);
+  renderValidation();
   renderPreview(c, {
     showAll: state.showAllRows,
     onEdit: (structureChanged = false) => {
@@ -508,7 +491,7 @@ function handleDownload() {
       return;
     }
     const base = state.file ? state.file.name.replace(/\.[^.]+$/, '') : 'All Data';
-    const wb = buildCombinedWorkbook(state.combined.rows, base);
+    const wb = buildCombinedWorkbook(state.combined.rows, base, state.combined.headerRows);
     downloadWorkbook(wb, outputFilename(state.file ? state.file.name : 'tables'));
     toast(`Downloaded ${outputFilename(state.file ? state.file.name : 'tables')}`);
   } catch (err) {
@@ -519,6 +502,29 @@ function handleDownload() {
       errEl.classList.remove('hidden');
     }
     toast(msg);
+  }
+}
+
+function renderValidation() {
+  const audit = state.audit;
+  if (!audit) return;
+  const issues = state.combined?.issues || [];
+  const reviewRows = new Set(issues.map(i => i.row)).size;
+  $('validationSummary').textContent =
+    `${audit.itemCount} extracted text fragments checked across ${audit.pageCount} pages. ` +
+    (audit.passed ? 'No extracted text lost or duplicated during reconstruction. ' : 'Reconstruction check failed. ') +
+    `${reviewRows} rows flagged for review. ` +
+    (audit.ocr ? 'OCR was used: verify recognized text against the PDF. ' : '') +
+    (audit.emptyPages.length ? `No text recovered on pages ${audit.emptyPages.join(', ')}; check whether they are blank or unreadable. ` : '') +
+    (state.dirty ? 'Your edits are included in the download. Checks describe the original extraction. ' : '') +
+    'These checks do not verify the meaning or visual accuracy of the source. Open Edit to compare with the PDF.';
+  const list = $('validationIssues'); list.replaceChildren();
+  const messages = new Set(issues.map(i => `Page ${i.page}, row ${i.row + 1}: ${i.message}`));
+  for (const message of [...messages].slice(0, CONFIG.PREVIEW_ROW_LIMIT)) {
+    const li = document.createElement('li'); li.textContent = message; list.append(li);
+  }
+  if (messages.size > CONFIG.PREVIEW_ROW_LIMIT) {
+    const li = document.createElement('li'); li.textContent = 'More flagged rows are available using Next issue in the editor.'; list.append(li);
   }
 }
 

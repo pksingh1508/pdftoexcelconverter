@@ -36,8 +36,8 @@ class OcrEngine {
       // Tesseract v5 API: createWorker('eng', OEM, { logger })
       this.worker = await Tesseract.createWorker('eng', 1, {
         logger: (m) => {
-          if (onLog && m && (m.status === 'recognizing text' || m.status === 'loading')) {
-            onLog(m);
+          if (this.onLog && m && (m.status === 'recognizing text' || m.status === 'loading')) {
+            this.onLog(m);
           }
         },
       });
@@ -62,6 +62,7 @@ class OcrEngine {
    * @returns {Promise<TextItem[]>}
    */
   async recognize(image, pageNumber, onLog = null) {
+    this.onLog = onLog;
     await this.init(onLog);
     const { data } = await this.worker.recognize(image);
     return wordsToItems(data, pageNumber);
@@ -108,7 +109,7 @@ export function wordsToItems(data, pageNumber) {
     const text = (w.text || '').trim();
     if (!text) continue;
     const conf = typeof w.confidence === 'number' ? w.confidence : 100;
-    if (conf < CONFIG.MIN_OCR_CONFIDENCE) continue;
+    // Retain uncertain words and flag them downstream; never drop data.
     const bbox = w.bbox || {};
     const x0 = bbox.x0 || 0;
     const y0 = bbox.y0 || 0;
@@ -116,10 +117,10 @@ export function wordsToItems(data, pageNumber) {
     const y1 = bbox.y1 || y0 + 10;
     items.push({
       text,
-      x: x0,
-      y: y0,
-      width: Math.max(2, x1 - x0),
-      height: Math.max(2, y1 - y0),
+      x: x0 / CONFIG.OCR_SCALE,
+      y: y0 / CONFIG.OCR_SCALE,
+      width: Math.max(2, x1 - x0) / CONFIG.OCR_SCALE,
+      height: Math.max(2, y1 - y0) / CONFIG.OCR_SCALE,
       page: pageNumber,
       source: 'ocr',
       confidence: Math.round(conf),

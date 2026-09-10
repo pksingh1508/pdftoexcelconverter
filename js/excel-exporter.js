@@ -108,33 +108,9 @@ export function sanitizeSheetName(name) {
  * @returns {string|number}
  */
 export function toCellValue(raw) {
-  const s = String(raw ?? '').trim();
-  if (s === '') return '';
-  // Leading-zero IDs / codes must stay text.
-  if (/^0\d+/.test(s)) return s;
-  // Hex-ish / mixed codes stay text.
-  if (/[A-Za-z]/.test(s) && !/^[A-Za-z]{1,3}\s?\d/.test(s)) {
-    // Pure month names etc. still text — fall through to text unless numeric below.
-    if (!/^[\d,.\s%$₹€£¥₹\-+()]+$/.test(s)) return s;
-  }
-  // Percentages: 45% -> 0.45 is risky for ambiguous data; keep display text
-  // but SheetJS community has no reliable % styling — preserve as text to avoid
-  // silently changing values. Only plain numbers convert.
-  const plain = s.replace(/,/g, '');
-  if (/^-?\(?[\d]+\.?\d*\)?$/.test(plain) || /^-?\d*\.\d+$/.test(plain)) {
-    // Reject things like "(12)" accounting negatives? Keep simple: plain only.
-    if (/^[().]/.test(plain)) return s;
-    const n = Number(plain);
-    if (Number.isFinite(n) && plain.length <= 15 && !/^0\d/.test(plain)) return n;
-  }
-  // Currency like $1,250 / ₹25,000 -> numeric ONLY if unambiguous single number.
-  const cur = s.replace(/^[$₹€£¥\s]+/, '').replace(/,/g, '').trim();
-  if (/^-?\d+(\.\d{1,4})?$/.test(cur) && /^[$₹€£¥]/.test(s) && s.length < 20 && !/^0\d/.test(cur)) {
-    const n = Number(cur);
-    if (Number.isFinite(n)) return n;
-  }
-  // ISO-ish dates: leave as text (locale-safe, no silent shifts).
-  return s;
+  // Exact display text is the default. Locale, precision, currency and
+  // leading zeros cannot be inferred safely from PDF strings.
+  return String(raw ?? '');
 }
 
 /**
@@ -145,7 +121,7 @@ export function toCellValue(raw) {
  * @param {string} sheetName - sanitized automatically
  * @returns {object} workbook
  */
-export function buildCombinedWorkbook(rows, sheetName = 'All Data') {
+export function buildCombinedWorkbook(rows, sheetName = 'All Data', headerRows = findHeaderRows(rows)) {
   const XLSX = getXLSX();
   const wb = XLSX.utils.book_new();
   const name = sanitizeSheetName(sheetName);
@@ -154,7 +130,7 @@ export function buildCombinedWorkbook(rows, sheetName = 'All Data') {
   );
   const ws = XLSX.utils.aoa_to_sheet(aoa);
 
-  const width = aoa[0] ? aoa[0].length : 1;
+  const width = aoa.reduce((w, row) => Math.max(w, row.length), 1);
   ws['!cols'] = Array.from({ length: width }, (_, c) => {
     let longest = 10;
     for (const row of aoa) {
@@ -172,7 +148,7 @@ export function buildCombinedWorkbook(rows, sheetName = 'All Data') {
   }
 
   // Bold + yellow headings, thin borders on every cell.
-  styleWorksheet(ws, findHeaderRows(rows));
+  styleWorksheet(ws, headerRows);
 
   XLSX.utils.book_append_sheet(wb, ws, name);
   return wb;
@@ -207,7 +183,7 @@ export function buildWorkbook(tables, baseName = 'tables') {
     const ws = XLSX.utils.aoa_to_sheet(aoa.length ? aoa : [['(empty)']]);
 
     // Reasonable column widths from content length.
-    const width = aoa[0] ? aoa[0].length : 1;
+    const width = aoa.reduce((w, row) => Math.max(w, row.length), 1);
     ws['!cols'] = Array.from({ length: width }, (_, c) => {
       let longest = 10;
       for (const row of aoa) {

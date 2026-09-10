@@ -106,14 +106,14 @@ export function setCombinedMeta(combined) {
   const dataRows = Math.max(0, rows.length - 1);
   const cols = rows[0] ? rows[0].length : 0;
   const pages = new Set();
-  let best = 0;
+  let best = 1;
   for (const s of combined.sources || []) {
     for (const p of s.pages || []) pages.add(p);
-    if (typeof s.confidence === 'number') best = Math.max(best, s.confidence);
+    if (typeof s.confidence === 'number') best = Math.min(best, s.confidence);
   }
   if (pill) {
-    const label = best >= 0.7 ? 'High confidence' : best >= 0.42 ? 'Medium confidence' : 'Low confidence';
-    pill.textContent = `${label}${best ? ` (${Math.round(best * 100)}%)` : ''}`;
+    const label = (combined.issues || []).length ? 'Review needed' : 'Structure detected';
+    pill.textContent = label;
     pill.className = 'confidence-pill ' + (best >= 0.7 ? 'high' : best >= 0.42 ? 'medium' : 'low');
   }
   if (els.tableMeta) {
@@ -122,7 +122,7 @@ export function setCombinedMeta(combined) {
       ? `pages ${pageList[0]}–${pageList[pageList.length - 1]} (${pageList.length})`
       : 'all pages';
     els.tableMeta.textContent =
-      `${dataRows} data rows × ${cols} columns • merged from ${scope}` +
+      `${rows.length} rows × ${cols} columns • ${scope}` +
       `${(combined.sources || []).length > 1 ? ` • ${combined.sources.length} sections` : ''}`;
   }
 }
@@ -147,8 +147,11 @@ export function renderPreview(table, opts) {
   rows.forEach((row, rIdx) => {
     const tr = document.createElement('tr');
     for (let c = 0; c < colCount; c++) {
-      const cell = document.createElement(rIdx === 0 ? 'th' : 'td');
-      const input = document.createElement('input');
+      const cell = document.createElement('td');
+      if (table.headerRows?.includes(rIdx)) cell.classList.add('heading-cell');
+      const input = document.createElement('textarea');
+      input.rows = 2;
+      input.readOnly = true;
       input.className = 'cell-input';
       input.value = row[c] ?? '';
       input.setAttribute('aria-label', `Row ${rIdx + 1}, Column ${c + 1}`);
@@ -161,24 +164,7 @@ export function renderPreview(table, opts) {
       cell.appendChild(input);
       tr.appendChild(cell);
     }
-    // Row actions (skip header for delete? allow all but keep min 1 row).
-    const act = document.createElement(rIdx === 0 ? 'th' : 'td');
-    act.className = 'row-actions-cell';
-    if (rIdx !== 0) {
-      const del = document.createElement('button');
-      del.type = 'button';
-      del.className = 'row-btn danger';
-      del.textContent = '🗑';
-      del.title = `Delete row ${rIdx + 1}`;
-      del.setAttribute('aria-label', `Delete row ${rIdx + 1}`);
-      del.addEventListener('click', () => {
-        table.rows.splice(rIdx, 1);
-        opts.onEdit(true);
-      });
-      act.appendChild(del);
-    }
-    tr.appendChild(act);
-    (rIdx === 0 ? thead : tbody).appendChild(tr);
+    tbody.appendChild(tr);
   });
 
   el.appendChild(thead);
