@@ -27,6 +27,10 @@ export const CONFIG = {
 
   // Canvas render scale for OCR pages (higher = better accuracy, more memory).
   OCR_SCALE: 2,
+  VERIFY_PASSES: [{ scale: 2, psm: '6' }, { scale: 3, psm: '11' }],
+  VERIFY_MIN_CONFIDENCE: 85,
+  VERIFY_OVERLAP: 0.3,
+  MAX_RENDER_PIXELS: 24000000,
 
   // Tesseract word confidence below this is flagged for review (0-100).
   MIN_OCR_CONFIDENCE: 40,

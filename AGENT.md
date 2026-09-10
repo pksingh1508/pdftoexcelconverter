@@ -9,8 +9,8 @@ Accurately convert tables from PDFs into editable Excel workbooks, entirely in t
 1. **Accuracy > visual features.** Never sacrifice extraction correctness for cosmetics.
 2. **Preserve user data.** Never silently discard uncertain values — surface low-confidence tables for review. NEVER move a value into a different column, NEVER glue it into a neighbor, NEVER drop it to "clean" the grid. An unnamed-but-correct column always beats a shifted sheet.
 3. **Row order is sacred.** Emission order must always be input (page, then top-to-bottom) order. Lock with tests.
-3. **PDF text extraction before OCR.** OCR is strictly a fallback for pages with too little usable text.
-4. **OCR only as fallback.** Never OCR a page that already yielded usable PDF.js text (unless user forces it).
+3. **PDF text extraction before OCR.** Read text first, then run default two-pass visual verification to recover incomplete text layers (user-authorized accuracy workflow).
+4. **OCR only as fallback.** Visual verification may OCR pages with usable text. Fast extraction may skip verification when explicitly selected by the user.
 5. **Table detection is coordinate-based.** Group by Y (rows), cluster by X (columns). Never rely on spaces inside strings.
 6. **Keep all processing client-side for V1.** No uploads, no backend, no storage.
 7. **No backend without a strong reason.** The app must deploy as static files (Vercel / Netlify / Pages).

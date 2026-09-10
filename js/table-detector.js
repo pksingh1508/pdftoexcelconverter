@@ -343,7 +343,7 @@ export function detectTablesOnPage(items, pageNumber) {
         message: 'Sparse or wrapped row; check blank cells and multi-line headings.' });
     });
     for (let r = 0; r < block.length; r++) {
-      if (block[r].items.some(it => it.source === 'ocr')) issues.push({ row: r,
+      if (block[r].items.some(it => it.source === 'ocr' && !it.verification)) issues.push({ row: r,
         message: 'OCR text requires comparison with the source PDF.',
         lowConfidence: block[r].items.some(it => it.confidence < CONFIG.MIN_OCR_CONFIDENCE) });
     }

@@ -61,11 +61,12 @@ class OcrEngine {
    * @param {(m:any)=>void} [onLog]
    * @returns {Promise<TextItem[]>}
    */
-  async recognize(image, pageNumber, onLog = null) {
+  async recognize(image, pageNumber, onLog = null, options = {}) {
     this.onLog = onLog;
     await this.init(onLog);
+    await this.worker.setParameters({ tessedit_pageseg_mode: options.psm || '6' });
     const { data } = await this.worker.recognize(image);
-    return wordsToItems(data, pageNumber);
+    return wordsToItems(data, pageNumber, options.scale || CONFIG.OCR_SCALE);
   }
 
   async terminate() {
@@ -101,14 +102,14 @@ export async function terminateOcrEngine() {
  * @param {number} pageNumber
  * @returns {TextItem[]}
  */
-export function wordsToItems(data, pageNumber) {
+export function wordsToItems(data, pageNumber, scale = CONFIG.OCR_SCALE) {
   const words = (data && data.words) || [];
   /** @type {TextItem[]} */
   const items = [];
   for (const w of words) {
     const text = (w.text || '').trim();
     if (!text) continue;
-    const conf = typeof w.confidence === 'number' ? w.confidence : 100;
+    const conf = typeof w.confidence === 'number' ? w.confidence : 0;
     // Retain uncertain words and flag them downstream; never drop data.
     const bbox = w.bbox || {};
     const x0 = bbox.x0 || 0;
@@ -117,10 +118,10 @@ export function wordsToItems(data, pageNumber) {
     const y1 = bbox.y1 || y0 + 10;
     items.push({
       text,
-      x: x0 / CONFIG.OCR_SCALE,
-      y: y0 / CONFIG.OCR_SCALE,
-      width: Math.max(2, x1 - x0) / CONFIG.OCR_SCALE,
-      height: Math.max(2, y1 - y0) / CONFIG.OCR_SCALE,
+      x: x0 / scale,
+      y: y0 / scale,
+      width: Math.max(2, x1 - x0) / scale,
+      height: Math.max(2, y1 - y0) / scale,
       page: pageNumber,
       source: 'ocr',
       confidence: Math.round(conf),
@@ -137,10 +138,10 @@ export function wordsToItems(data, pageNumber) {
  * @param {(m:any)=>void} [onProgress]
  * @returns {Promise<TextItem[]>}
  */
-export async function ocrCanvas(canvas, pageNumber, onProgress = null) {
+export async function ocrCanvas(canvas, pageNumber, onProgress = null, options = {}) {
   const engine = getOcrEngine();
   try {
-    return await engine.recognize(canvas, pageNumber, onProgress);
+    return await engine.recognize(canvas, pageNumber, onProgress, options);
   } catch (err) {
     throw new Error(`OCR failed on page ${pageNumber}: ${(err && err.message) || err}`);
   }

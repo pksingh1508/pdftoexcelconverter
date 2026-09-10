@@ -130,6 +130,7 @@ export async function renderPageToCanvas(pdf, pageNumber, canvas, scale = CONFIG
   const page = await pdf.getPage(pageNumber);
   try {
     const viewport = page.getViewport({ scale });
+    if (viewport.width * viewport.height > CONFIG.MAX_RENDER_PIXELS) throw new Error('Page exceeds the safe rendering size. Visual verification could not complete.');
     const ctx = canvas.getContext('2d', { alpha: false });
     canvas.width = Math.floor(viewport.width);
     canvas.height = Math.floor(viewport.height);
