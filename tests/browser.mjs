@@ -18,6 +18,7 @@ if (process.env.TEST_VENDOR_DIR) {
 await page.goto(process.env.TEST_BASE_URL || 'http://127.0.0.1:8080');
 await page.locator('#fileInput').setInputFiles(decodeURIComponent(new URL('../SIEMENS ENERGY 993 A2.pdf', import.meta.url).pathname));
 await page.locator('#fileDetails').filter({hasText:'32 pages'}).waitFor();
+await page.locator('#verifyVisually').uncheck();
 await page.locator('#convertBtn').click();
 await page.locator('#editBtn').waitFor({state:'visible',timeout:60000});
 await page.locator('#editBtn').click();

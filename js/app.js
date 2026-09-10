@@ -1,3 +1,4 @@
+import { verifyPage, attachVerificationIssues } from './page-verifier.js';
 import { auditExtraction } from './validation.js';
 import { createEditor } from './editor.js';
 /**
@@ -76,6 +77,7 @@ async function init() {
   configurePdfWorker();
   editor = createEditor({ getData: () => state.combined, getPdf: () => state.pdf,
     onEdit: () => { state.dirty = true; renderCombined(); }, onDownload: handleDownload });
+  $('downloadVerification').addEventListener('click', downloadVerificationReport);
   $('retryOcrBtn').addEventListener('click', () => convert(true));
   $('editBtn').addEventListener('click', () => editor.open(state.file));
 
@@ -148,6 +150,7 @@ async function init() {
   els.cancelBtn.addEventListener('click', () => {
     state.cancelled = true;
     setProgress(0, 'Cancelling…');
+    void terminateOcrEngine();
   });
   els.downloadBtn.addEventListener('click', handleDownload);
   els.convertAnotherBtn.addEventListener('click', fullReset);
@@ -276,6 +279,8 @@ async function convert(forceOcr) {
     /** @type {Array} detected tables in page order */
     let tables = [];
     let ocrUsed = false;
+    const verificationPages = [];
+    const visualVerification = forceOcr || $('verifyVisually').checked;
 
     for (let p = 1; p <= pageCount; p++) {
       if (isCancelled()) throw cancelledError();
@@ -291,8 +296,16 @@ async function convert(forceOcr) {
         items = [];
       }
 
-      const needsOcr = forceOcr || pageNeedsOcr(items);
-      if (needsOcr) {
+      let verification = null;
+      if (visualVerification) {
+        ocrUsed = true;
+        showOcrNotice(true);
+        els.processingTitle.textContent = 'Verifying page images…';
+        verification = await verifyPage(pdf, p, items, { isCancelled,
+          onProgress: message => { if (!isCancelled()) setProgress(base + 2, message, `Page ${p} of ${pageCount}`); } });
+        items = verification.items;
+        verificationPages.push(verification);
+      } else if (pageNeedsOcr(items)) {
         if (isCancelled()) throw cancelledError();
         ocrUsed = true;
         showOcrNotice(true);
@@ -313,6 +326,7 @@ async function convert(forceOcr) {
       if (isCancelled()) throw cancelledError();
       setProgress(base + 5, 'Reconstructing rows and columns', `Page ${p} of ${pageCount}`);
       const pageTables = detectTablesOnPage(items, p);
+      if (verification) attachVerificationIssues(pageTables, verification);
       for (const t of pageTables) {
         t.rows = cleanTable(t.rows);
         t.title = `Table ${tables.length + 1} - Page ${p}`;
@@ -350,6 +364,10 @@ async function convert(forceOcr) {
     // Preserve page/section order in a single preview and worksheet.
     state.combined = combineTables(tables);
     state.audit = auditExtraction(allItems, state.combined, pageCount);
+    state.verification = {
+      mode: visualVerification ? 'two-pass-visual' : 'fast',
+      pages: verificationPages.map(({ items, ...report }) => report),
+    };
     if (!state.audit.passed) throw new Error('Integrity check failed: extracted text was lost or duplicated during reconstruction.');
 
     setProgress(97, 'Preparing preview', '');
@@ -514,23 +532,41 @@ function renderValidation() {
   const audit = state.audit;
   if (!audit) return;
   const issues = state.combined?.issues || [];
-  const reviewRows = new Set(issues.map(i => i.row)).size;
+  const reviewRows = new Set(issues.filter(i => !['recovered', 'corrected'].includes(i.verificationStatus)).map(i => i.row)).size;
+  const pages = state.verification?.pages || [];
+  const total = key => pages.reduce((n, p) => n + (p.counts[key] || 0), 0);
+  const failed = pages.filter(p => p.failures.length);
+  const verificationSummary = state.verification?.mode === 'two-pass-visual'
+    ? `Visual checks: ${total('recovered')} missing regions recovered, ${total('corrected')} embedded readings corrected, ${total('agreement')} agreements, ${total('unresolved')} unresolved regions. ` +
+      (failed.length ? `Visual checks incomplete on pages ${failed.map(p => p.page).join(', ')}. ` : '')
+    : 'Fast mode: page images were not cross-checked. ';
   $('validationSummary').textContent =
-    `${audit.itemCount} extracted text fragments checked across ${audit.pageCount} pages. ` +
-    (audit.passed ? 'No extracted text lost or duplicated during reconstruction. ' : 'Reconstruction check failed. ') +
+    verificationSummary + `${audit.itemCount} selected text fragments checked across ${audit.pageCount} pages. ` +
+    (audit.passed ? 'No selected text lost or duplicated during reconstruction. ' : 'Reconstruction check failed. ') +
     `${reviewRows} rows flagged for review. ` +
-    (audit.ocr ? 'OCR was used: verify recognized text against the PDF. ' : '') +
-    (audit.emptyPages.length ? `No text recovered on pages ${audit.emptyPages.join(', ')}; check whether they are blank or unreadable. ` : '') +
+    (audit.emptyPages.length ? `No text recovered on pages ${audit.emptyPages.join(', ')}; they may be blank or unreadable. ` : '') +
     (state.dirty ? 'Your edits are included in the download. Checks describe the original extraction. ' : '') +
-    'These checks do not verify the meaning or visual accuracy of the source. Open Edit to compare with the PDF.';
+    'Automatic repairs require matching high-confidence OCR readings. Agreement is evidence, not proof of accuracy. The report retains original and alternate readings.';
   const list = $('validationIssues'); list.replaceChildren();
-  const messages = new Set(issues.map(i => `Page ${i.page}, row ${i.row + 1}: ${i.message}`));
+  const messages = new Set(issues.map(i => `Page ${i.page}, row ${i.row + 1}: ${i.message}${i.evidence ? ` ${i.evidence}` : ''}`));
+  for (const p of pages) for (const failure of p.failures) messages.add(`Page ${p.page}, OCR pass ${failure.pass}: ${failure.message}`);
   for (const message of [...messages].slice(0, CONFIG.PREVIEW_ROW_LIMIT)) {
     const li = document.createElement('li'); li.textContent = message; list.append(li);
   }
   if (messages.size > CONFIG.PREVIEW_ROW_LIMIT) {
     const li = document.createElement('li'); li.textContent = 'More flagged rows are available using Next issue in the editor.'; list.append(li);
   }
+}
+
+function downloadVerificationReport() {
+  if (!state.verification) return;
+  const report = { file: state.file?.name, reconstruction: state.audit,
+    verification: state.verification, editedSinceExtraction: state.dirty,
+    note: 'Readings and automatic decisions describe initial extraction. OCR agreement is not proof of correctness.' };
+  const url = URL.createObjectURL(new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' }));
+  const link = document.createElement('a');
+  link.href = url; link.download = `${state.file.name.replace(/\.pdf$/i, '')}-verification.json`;
+  link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 document.addEventListener('DOMContentLoaded', init);

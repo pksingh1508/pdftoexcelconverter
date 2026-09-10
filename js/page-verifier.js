@@ -37,19 +37,15 @@ export async function verifyPage(pdf, page, pdfItems, { onProgress = () => {}, i
 
 /** Link reconciliation evidence back to physical spreadsheet rows. */
 export function attachVerificationIssues(tables, verification) {
-  for (const table of tables) {
-    for (let row = 0; row < table.rows.length; row++) {
-      const y = table.rowOrigins[row].y;
-      const next = table.rowOrigins[row + 1]?.y ?? Infinity;
-      const regions = verification.regions.filter(r => r.y >= y - CONFIG.ROW_Y_TOLERANCE && r.y < next - CONFIG.ROW_Y_TOLERANCE);
-      for (const region of regions.filter(r => r.status !== 'agreement')) {
-        const message = region.status === 'unresolved'
-          ? 'Readings disagree or lack corroboration. Original reading retained.'
-          : region.status === 'recovered' ? 'Missing text recovered by agreement between two OCR passes.'
-            : 'Embedded text corrected by agreement between two high-confidence OCR passes.';
-        table.issues.push({ row, message, regionId: region.id, verificationStatus: region.status,
-          evidence: region.texts.map((t, i) => `${['PDF', 'OCR 1', 'OCR 2'][i]}: ${t || '(not found)'}`).join(' | ') });
-      }
-    }
+  const physicalRows = tables.flatMap(table => table.rowOrigins.map((origin, row) => ({ table, row, y: origin.y })));
+  for (const region of verification.regions.filter(r => r.status !== 'agreement')) {
+    const target = physicalRows.reduce((best, r) => !best || Math.abs(r.y - region.y) < Math.abs(best.y - region.y) ? r : best, null);
+    if (!target) continue;
+    const message = region.status === 'unresolved'
+      ? 'Readings disagree or lack corroboration. Original reading retained.'
+      : region.status === 'recovered' ? 'Missing text recovered by agreement between two OCR passes.'
+        : 'Embedded text corrected by agreement between two high-confidence OCR passes.';
+    target.table.issues.push({ row: target.row, message, regionId: region.id, verificationStatus: region.status,
+      evidence: region.texts.map((t, i) => `${['PDF', 'OCR 1', 'OCR 2'][i]}: ${t || '(not found)'}`).join(' | ') });
   }
 }

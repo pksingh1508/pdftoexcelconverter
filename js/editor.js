@@ -91,7 +91,7 @@ export function createEditor({ getData, getPdf, onEdit, onDownload }) {
     const issues = new Map();
     for (const issue of data.issues || []) {
       if (!issues.has(issue.row)) issues.set(issue.row, new Set());
-      issues.get(issue.row).add(issue.message);
+      issues.get(issue.row).add(issue.message + (issue.evidence ? `\n${issue.evidence}` : ''));
     }
     for (let r = offset; r < end; r++) {
       const tr = body.insertRow();

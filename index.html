@@ -80,6 +80,8 @@
               <button type="button" class="btn btn-ghost" id="removeFileBtn" aria-label="Remove selected file">Remove</button>
             </div>
             <div class="file-actions">
+              <label class="verification-option"><input type="checkbox" id="verifyVisually" checked> Verify and repair using two visual OCR passes</label>
+              <p class="muted small">Checks every page for missing or incorrect embedded text. Runs locally and takes longer. Uncheck for fast text extraction.</p>
               <button type="button" class="btn btn-primary btn-large" id="convertBtn">
                 Convert to Excel
               </button>
@@ -101,7 +103,7 @@
               <div class="progress-fill" id="progressFill" style="width: 0%"></div>
             </div>
             <p class="progress-pct" id="progressPct">0%</p>
-            <p class="ocr-notice hidden" id="ocrNotice" role="status">Scanned document detected. OCR processing may take longer.</p>
+            <p class="ocr-notice hidden" id="ocrNotice" role="status">Reading page images to verify text. Visual checks may take longer.</p>
             <button type="button" class="btn btn-ghost" id="cancelBtn">Cancel</button>
           </div>
         </div>
@@ -138,8 +140,8 @@
           <details class="validation-panel" open>
             <summary>Extraction checks &amp; review</summary>
             <p id="validationSummary" role="status"></p>
-            <button class="btn btn-small btn-secondary" id="retryOcrBtn">Re-extract with OCR (replaces edits)</button>
-            <ul id="validationIssues"></ul>
+            <button class="btn btn-small btn-secondary" id="retryOcrBtn">Recheck and repair (replaces edits)</button>
+            <button class="btn btn-small btn-secondary" id="downloadVerification">Download verification report</button><ul id="validationIssues"></ul>
           </details>
           <div id="tablesWrap">
             <div class="table-toolbar">

@@ -71,6 +71,7 @@ class OcrEngine {
 
   async terminate() {
     try {
+      if (this._initializing) await this._initializing;
       if (this.worker && this.worker.terminate) await this.worker.terminate();
     } catch {
       /* ignore */
