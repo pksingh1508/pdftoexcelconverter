@@ -4,18 +4,9 @@
  * both are normalized to { text, x, y, width, height, page, source } with a
  * top-left origin.
  *
- * Pipeline (v2 — gap-based, verified on real packing-note PDFs):
- *   items -> rows (Y grouping) -> cells (gap-based word joining)
- *         -> candidate blocks (structure only)
- *         -> per-block columns (interval-overlap alignment)
- *         -> wrap merging -> scoring -> dominance filter -> tables[]
- *
- * Why gap-based: PDF text items are WORDS, not cells. The old approach
- * clustered every word-start X into columns, so "1000 - SKID PIPING,
- * PIPING VLV" shattered into 3-4 fake columns. Now words separated by a
- * small gap join one cell; only LARGE gutters start new columns. As a
- * bonus, letterhead lines (normal word spacing) collapse to single-cell
- * rows and are excluded automatically.
+ * Physical rows are retained; columns use recurring body spans and heading
+ * positions. No dominance filtering, row folding, or label-based reordering.
+ * Uncertain layouts carry review issues and every source token is audited.
  *
  * @module table-detector
  */
@@ -38,32 +29,6 @@ import { CONFIG } from './config.js';
  * @property {number} x0 - left edge
  * @property {number} x1 - right edge
  */
-
-/**
- * Cluster 1-D values so near-equal coordinates share a column.
- * (Used by the low-confidence fallback path.)
- * @param {number[]} values
- * @param {number} tolerance
- * @returns {number[]} sorted cluster centers (medians)
- */
-export function clusterXPositions(values, tolerance) {
-  if (!values.length) return [];
-  const sorted = [...values].sort((a, b) => a - b);
-  const clusters = [];
-  let current = [sorted[0]];
-  for (let i = 1; i < sorted.length; i++) {
-    const v = sorted[i];
-    const last = current[current.length - 1];
-    if (Math.abs(v - last) <= tolerance) {
-      current.push(v);
-    } else {
-      clusters.push(median(current));
-      current = [v];
-    }
-  }
-  clusters.push(median(current));
-  return clusters;
-}
 
 function median(arr) {
   const s = [...arr].sort((a, b) => a - b);
@@ -231,79 +196,6 @@ function buildBlockColumns(blockRows) {
   return columns;
 }
 
-/**
- * Map a block's cells onto its column model.
- * Cells that drift slightly (right-aligned numbers) attach to the nearest
- * column instead of vanishing.
- */
-function mapBlockToGrid(blockRows, columns) {
-  return blockRows.map((row) => {
-    const out = new Array(columns.length).fill('');
-    for (const cell of row.cells) {
-      let idx = findColumn(cell, columns);
-      if (idx < 0) {
-        // Nearest-center fallback for slight drift; never invent columns here.
-        const cc = (cell.x0 + cell.x1) / 2;
-        let bestD = Infinity;
-        idx = 0;
-        columns.forEach((c, i) => {
-          const d = Math.abs((c.x0 + c.x1) / 2 - cc);
-          if (d < bestD) {
-            bestD = d;
-            idx = i;
-          }
-        });
-      }
-      out[idx] = out[idx] ? `${out[idx]} ${cell.text}` : cell.text;
-    }
-    return out;
-  });
-}
-
-/**
- * Merge columns that describe the same logical column.
- * Two cases: (a) near-duplicate spans ([89,204] vs [89,205]) from
- * builder tie-break races — merged by high intersection-over-union;
- * (b) a small interval (header remnant, text splinter like a lone "VLV")
- * substantially contained in a much larger one — merged by containment,
- * with a width-ratio cap so genuinely small columns (UM, QTY) are never
- * swallowed by a wide neighbor. Distinct adjacent columns are always
- * gutter-separated and never merge.
- * @param {Array<{x0:number,x1:number}>} columns
- */
-export function mergeOverlappingColumns(columns) {
-  const parent = columns.map((_, i) => i);
-  const find = (a) => (parent[a] === a ? a : (parent[a] = find(parent[a])));
-  for (let i = 0; i < columns.length; i++) {
-    for (let j = i + 1; j < columns.length; j++) {
-      const a = columns[i];
-      const b = columns[j];
-      const wa = a.x1 - a.x0 || 1;
-      const wb = b.x1 - b.x0 || 1;
-      const ov = Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0);
-      if (ov <= 0) continue;
-      const containment = ov / Math.min(wa, wb);
-      const iou = ov / (Math.max(a.x1, b.x1) - Math.min(a.x0, b.x0));
-      const ratio = Math.max(wa, wb) / Math.min(wa, wb);
-      if (iou >= 0.85 || (containment >= 0.7 && ratio <= 12)) {
-        parent[find(i)] = find(j);
-      }
-    }
-  }
-  const groups = new Map();
-  columns.forEach((c, i) => {
-    const r = find(i);
-    if (!groups.has(r)) groups.set(r, []);
-    groups.get(r).push(c);
-  });
-  return [...groups.values()]
-    .map((g) => ({
-      x0: Math.min(...g.map((c) => c.x0)),
-      x1: Math.max(...g.map((c) => c.x1)),
-    }))
-    .sort((a, b) => (a.x0 + a.x1) / 2 - (b.x0 + b.x1) / 2);
-}
-
 function nonEmptyCount(row) {
   return row.filter((c) => String(c || '').trim() !== '').length;
 }
@@ -409,8 +301,7 @@ export function detectTablesOnPage(items, pageNumber) {
   if (block.length) blocks.push(block);
 
   return blocks.map((block, index) => {
-    // Start with the densest physical row, not a spanning title/header.
-    // Never let a wide header expand a column over its neighbours.
+    // Recurring body rows establish columns before spanning headings.
     const seed = block.reduce((a, b) => b.cells.length > a.cells.length ? b : a);
     // Repeated body shapes establish spans before short, centred headings.
     // This lets a description's full extent absorb its split word fragments.
@@ -444,8 +335,8 @@ export function detectTablesOnPage(items, pageNumber) {
         const candidates = columns.map((c, i) => ({ c, i,
           overlap: Math.max(0, Math.min(c.x1, cell.x1) - Math.max(c.x0, cell.x0)),
         })).filter(c => c.overlap > 0);
-        // Monotonic assignment preserves left-to-right order and never
-        // concatenates two distinct cells into one column.
+        // Monotonic assignment preserves left-to-right order. Fragments
+        // contained in one established column can join within that cell.
         const available = candidates.filter(c => c.i >= previous);
         available.sort((a, b) =>
           Math.abs(a.c.x0 - cell.x0) - Math.abs(b.c.x0 - cell.x0));
@@ -490,93 +381,6 @@ export function detectTablesOnPage(items, pageNumber) {
 }
 
 /**
- * Look ahead for the next dense (multi-cell) row after index i.
- * @param {Array<{cells:Cell[]}>} rowCells
- */
-function findNextDense(rowCells, i) {
-  for (let j = i + 1; j < rowCells.length; j++) {
-    if (rowCells[j].cells.length >= 2) return rowCells[j];
-  }
-  return null;
-}
-
-/**
- * Drop minor blocks when a dominant main table exists on the same page.
- * A strong table (packing list, statement…) keeps letterhead fragments,
- * address boxes and footnotes out of the result. A sibling is dropped only
- * when it is BOTH much weaker in score AND much smaller in rows — so a
- * small but excellent table (totals, second section) always survives.
- * Pages without a strong table keep everything; absolute junk below the
- * floor is always dropped (unless it is all there is).
- * @param {Array} tables
- */
-export function filterMinorTables(tables) {
-  if (!tables.length) return tables;
-  let kept = tables.filter((t) => t.confidence >= CONFIG.ABS_MIN_TABLE_SCORE);
-  if (!kept.length) return tables; // never wipe out everything
-  if (kept.length < 2) return kept;
-  const best = Math.max(...kept.map((t) => t.confidence));
-  const bestRows = Math.max(...kept.map((t) => t.rows.length));
-  if (best >= CONFIG.BEST_TABLE_MIN_SCORE) {
-    const bestTable = kept.reduce((a, b) => (b.confidence > a.confidence ? b : a));
-    const bestHeadLen = avgRowLen(bestTable.rows[0]);
-    const strong = kept.filter(
-      (t) =>
-        !(
-          t.confidence < best - CONFIG.TABLE_SCORE_MARGIN &&
-          t.rows.length < CONFIG.TABLE_ROW_FRACTION * bestRows
-        ) &&
-        // Address/letterhead block next to a real header-led table: its
-        // first row is long phrases, not short labels. Decides equal-size
-        // ties (e.g. a partial last page) that the size rule cannot.
-        !(
-          t !== bestTable &&
-          t.confidence < best &&
-          t.rows.length <= bestRows &&
-          avgRowLen(t.rows[0]) > 22 &&
-          bestHeadLen <= 14
-        )
-    );
-    if (strong.length) kept = strong;
-  }
-  return kept;
-}
-
-/** Average trimmed cell length of a grid row. */
-function avgRowLen(row) {
-  const cells = (row || []).filter((c) => String(c || '').trim() !== '');
-  if (!cells.length) return 99;
-  return cells.reduce((n, c) => n + String(c).trim().length, 0) / cells.length;
-}
-
-/**
- * Drop phantom columns: unnamed in the header row AND completely empty.
- * Nothing else is ever removed or merged: a sparse-but-real column (e.g. a
- * UM column whose header text is missing from the PDF layer and which holds
- * values on only a few rows) MUST survive with its values exactly in place.
- * Gluing its values into a neighboring column would shift every column to
- * its right and corrupt the whole sheet — in a production system a visible
- * unnamed column is always preferable to silently moved data.
- * Named columns (even fully empty ones like TAG) are always kept — they are
- * real table structure.
- * @param {string[][]} grid - uniform-width rows, first row is the header
- * @returns {string[][]}
- */
-export function dropSparseColumns(grid) {
-  if (!grid.length || grid[0].length < 2) return grid;
-  const header = grid[0];
-  const keep = header.map((h, c) => {
-    if (String(h || '').trim() !== '') return true;
-    for (const r of grid) {
-      if (String(r[c] || '').trim() !== '') return true;
-    }
-    return false;
-  });
-  if (keep.every(Boolean)) return grid;
-  return grid.map((row) => row.filter((_, c) => keep[c]));
-}
-
-/**
  * Pad every row to equal length and clean whitespace.
  */
 export function normalizeGrid(grid) {
@@ -592,194 +396,7 @@ function cleanCell(v) {
   return String(v).replace(/\s+/g, ' ').trim();
 }
 
-/**
- * Remove fully-empty leading/trailing columns and empty rows.
- */
-export function trimEmptyEdges(grid) {
-  if (!grid.length) return grid;
-  const width = grid[0].length;
-  let left = 0;
-  let right = width - 1;
-  const colEmpty = (c) => grid.every((r) => !String(r[c] || '').trim());
-  while (left <= right && colEmpty(left)) left++;
-  while (right >= left && colEmpty(right)) right--;
-  if (left > right) return grid;
-  return grid
-    .map((r) => r.slice(left, right + 1))
-    .filter((r) => r.some((c) => String(c).trim() !== ''));
-}
-
-function round2(n) {
-  return Math.round(n * 100) / 100;
-}
-
-/**
- * Map source header columns onto union header positions by label.
- * Labeled columns match by normalized label text. Unlabeled (empty) ones
- * and unmatched labels return -1 — the CALLER decides (positional pairing
- * under a match gate, or appending a new visible slot). Never force a
- * value into a wrong slot.
- * @param {string[]} srcHeader
- * @param {string[]} unionHeader
- * @returns {number[]}
- */
-export function mapColumnsToUnion(srcHeader, unionHeader) {
-  const norm = (s) => String(s || '').trim().toLowerCase();
-  const used = new Set();
-  const map = new Array(srcHeader.length).fill(-1);
-  srcHeader.forEach((h, c) => {
-    const n = norm(h);
-    if (!n) return;
-    for (let u = 0; u < unionHeader.length; u++) {
-      if (!used.has(u) && norm(unionHeader[u]) === n) {
-        used.add(u);
-        map[c] = u;
-        return;
-      }
-    }
-  });
-  return map;
-}
-
-/**
- * Merge tables across pages when a table clearly continues:
- * same column count + identical repeated header row.
- * Rows are merged by HEADER-LABEL alignment, never by raw index, so a
- * near-matching header can never shift values into wrong columns — if the
- * labels do not line up, the tables stay separate instead.
- * @param {Array} tables - in page order
- * @returns {Array} merged tables with updated ids/titles
- */
-export function mergeContinuedTables(tables) {
-  if (tables.length < 2) return tables;
-  const out = [tables[0]];
-  for (let i = 1; i < tables.length; i++) {
-    const prev = out[out.length - 1];
-    const cur = tables[i];
-    if (
-      prev.rows[0] &&
-      cur.rows[0] &&
-      prev.rows[0].length === cur.rows[0].length &&
-      headersEqual(prev.rows[0], cur.rows[0]) &&
-      Math.abs(prev.pageNumbers[prev.pageNumbers.length - 1] - cur.pageNumbers[0]) <= 1
-    ) {
-      const map = mapColumnsToUnion(cur.rows[0], prev.rows[0]);
-      // Same width + gate passed: pair any leftovers positionally so an
-      // unnamed column (e.g. UM present as values but missing header text)
-      // still lands in its positional slot instead of blocking the merge.
-      const freeU = prev.rows[0].map((_, u) => u).filter((u) => !map.includes(u));
-      const leftover = cur.rows[0].map((_, c) => c).filter((c) => map[c] === -1);
-      leftover.forEach((c, k) => {
-        if (k < freeU.length) map[c] = freeU[k];
-      });
-      if (map.includes(-1)) {
-        out.push(cur); // labels do not line up: keep separate, never shift
-        continue;
-      }
-      const width = prev.rows[0].length;
-      const mapped = cur.rows.slice(1).map((r) => {
-        const nr = new Array(width).fill('');
-        r.forEach((val, c) => {
-          const u = map[c];
-          if (u === undefined || u < 0 || u >= width) return;
-          nr[u] = nr[u] ? `${nr[u]} ${val}`.trim() : val;
-        });
-        return nr;
-      });
-      prev.rows = [...prev.rows, ...mapped];
-      // Adopt header labels the earlier pages were missing (e.g. a UM
-      // header absent from page 1's text layer but present later).
-      cur.rows[0].forEach((h, c) => {
-        const u = map[c];
-        if (u >= 0 && !String(prev.rows[0][u] || '').trim() && String(h || '').trim()) {
-          prev.rows[0][u] = h;
-        }
-      });
-      prev.pageNumbers = [...new Set([...prev.pageNumbers, ...cur.pageNumbers])];
-      prev.confidence = round2(Math.min(1, (prev.confidence + cur.confidence) / 2 + 0.03));
-      prev.confidenceLabel = confidenceLabel(prev.confidence);
-      prev.merged = true;
-    } else {
-      out.push(cur);
-    }
-  }
-  return out.map((t, i) => ({ ...t, id: `table-${i + 1}` }));
-}
-
-function headersEqual(a, b) {
-  const norm = (r) => r.map((c) => String(c).trim().toLowerCase()).join('|');
-  if (norm(a) === norm(b)) return true;
-  // Near-identical: >= 80% cells equal.
-  if (a.length !== b.length) return false;
-  let same = 0;
-  for (let i = 0; i < a.length; i++) {
-    if (String(a[i]).trim().toLowerCase() === String(b[i]).trim().toLowerCase()) same++;
-  }
-  return same / a.length >= 0.8;
-}
-
-/**
- * Merge ALL tables with the exact same heading, wherever they appear.
- * mergeContinuedTables only joins adjacent continuations; a table that
- * repeats on non-consecutive pages (e.g. pages 1, 5 and 9 with other
- * content between) would otherwise export with its heading repeated.
- * After this pass the sheet holds ONE heading at the top and all data
- * rows below it. Exact normalized match only — near-matches stay separate.
- * @param {Array} tables - in page order
- * @returns {Array} merged tables with updated ids
- */
-export function mergeSameHeaderTables(tables) {
-  if (tables.length < 2) return tables;
-  const keyOf = (t) => {
-    if (!t.rows || !t.rows.length) return null;
-    const cells = t.rows[0].map((c) =>
-      String(c || '').trim().replace(/\s+/g, ' ').toLowerCase()
-    );
-    return t.rows[0].length + '|' + JSON.stringify(cells);
-  };
-  const claimed = new Set();
-  const out = [];
-  tables.forEach((t, i) => {
-    if (claimed.has(i)) return;
-    const key = keyOf(t);
-    if (key === null) {
-      out.push(t);
-      return;
-    }
-    claimed.add(i);
-    let rows = t.rows.map((r) => r.slice());
-    let pages = [...(t.pageNumbers || [])];
-    let confSum = t.confidence || 0;
-    let confN = 1;
-    tables.forEach((u, j) => {
-      if (claimed.has(j) || keyOf(u) !== key) return;
-      claimed.add(j);
-      rows.push(...u.rows.slice(1).map((r) => r.slice()));
-      for (const p of u.pageNumbers || []) if (!pages.includes(p)) pages.push(p);
-      confSum += u.confidence || 0;
-      confN++;
-    });
-    pages.sort((a, b) => a - b);
-    out.push({
-      ...t,
-      rows,
-      pageNumbers: pages,
-      confidence: round2(confSum / confN),
-      sameHeaderMerged: confN > 1,
-    });
-  });
-  return out.map((t, i) => ({ ...t, id: `table-${i + 1}` }));
-}
-
-/**
- * Combine all detected tables into ONE dataset for the single-sheet export.
- * The union starts from the LONGEST header so no labeled column is ever
- * left without a slot. Every table maps by shared header labels; columns
- * with no counterpart extend the union visibly instead of shifting data.
- * Row order always follows the input (page) order.
- * @param {Array<{id:string, pageNumbers:number[], confidence:number, rows:string[][]}>} tables
- * @returns {{rows:string[][], header:string[], sources:Array, pageCount:number}}
- */
+/** Stack sections in source order; only insert blanks for matching physical layouts. */
 export function combineTables(tables) {
   const ordered = [...tables].sort((a, b) =>
     (a.pageNumbers?.[0] || 0) - (b.pageNumbers?.[0] || 0) || (a.y || 0) - (b.y || 0));
@@ -814,34 +431,6 @@ export function combineTables(tables) {
   }
   return { rows, header: rows[0]?.slice() || [], sources, pageCount: pages.size,
     rowOrigins, headerRows, issues };
-}
-
-/**
- * Map each row's items onto shared column centers.
- * (Used by the low-confidence fallback path.)
- * @param {Array<{y:number, items:TextItem[]}>} rows
- * @param {number[]} colCenters - sorted ascending
- * @returns {string[][]} grid, one array per row
- */
-export function mapRowsToColumns(rows, colCenters) {
-  return rows.map((row) => {
-    const cells = new Array(colCenters.length).fill('');
-    for (const item of row.items) {
-      const cx = item.x + (item.width || 0) / 2;
-      let best = 0;
-      let bestDist = Infinity;
-      for (let c = 0; c < colCenters.length; c++) {
-        const d = Math.abs(cx - colCenters[c]);
-        if (d < bestDist) {
-          bestDist = d;
-          best = c;
-        }
-      }
-      const text = item.text;
-      cells[best] = cells[best] ? `${cells[best]} ${text}` : text;
-    }
-    return cells;
-  });
 }
 
 /**

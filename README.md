@@ -1,121 +1,70 @@
-# PDF to Excel — Client-Side PDF Table Converter
+# PDF to Excel
 
-Extract tables from PDF documents and download them as clean, editable `.xlsx` spreadsheets. **100% client-side:** your document is processed locally in your browser and is never uploaded to any server.
+A static, browser-only PDF converter built with vanilla JavaScript, PDF.js 3.11.174, Tesseract.js 5.0.5, and xlsx-js-style 1.2.0. Documents stay on the user's device.
 
-## Features
+## Run
 
-- 📄 Drag & drop or click-to-browse PDF upload (max 50 MB, validated)
-- 🔍 Coordinate-based table detection (rows from Y positions, columns from X clustering)
-- 📷 Scanned-PDF fallback: page rendered to canvas → Tesseract.js OCR → same table pipeline
-- 👀 Single combined preview with confidence badge — all pages merged into one grid
-- ✏️ Editable preview — click any cell, add/delete rows & columns
-- 📊 One download button → one `.xlsx` file → one worksheet with ALL data
-- 🔒 Privacy-first: no backend, no database, no auth, no uploads
-- 📱 Responsive + accessible (keyboard navigation, ARIA, focus styles)
-- ⏹️ Cancellable long runs with live progress (page X of Y, OCR %)
+Serve the project over HTTP (ES modules cannot run from `file://`):
 
-## Technology
-
-| Concern | Library | How |
-|---|---|---|
-| PDF reading + text positions + page rendering | [PDF.js 3.11.174](https://mozilla.github.io/pdf.js/) (cdnjs) | `getTextContent()` → `{text,x,y,width,height,page}` normalized to top-left origin |
-| OCR fallback | [Tesseract.js v5](https://tesseract.projectnaptha.com/) (jsDelivr) | Word boxes → same `{text,x,y,…}` shape; shared worker, terminated after run |
-| Export (styled) | [xlsx-js-style 1.2.0](https://github.com/gitbrent/xlsx-js-style) (jsDelivr, SheetJS API-compatible) | Bold + yellow headings, thin borders on all cells (`buildCombinedWorkbook`) |
-| App code | Vanilla HTML5 + CSS3 + ES modules | No React / Vue / backend |
-
-## How PDF extraction works
-
-1. `pdf-parser.js` loads the PDF with PDF.js and, per page, reads `page.getTextContent()`.
-2. Each fragment's `transform[4]/transform[5]` gives X/Y; Y is flipped to a top-left origin (`pageHeight − y`) so PDF text and OCR boxes share one coordinate system. Rows group by Y proximity, with an extra rule that joins tiny fragments (dashes, split-off words like "VLV") sitting 1–3 units off their text line — otherwise they become phantom rows.
-3. `table-detector.js` splits each row into **cells by gaps**: words separated by small gaps join one cell (`1000 - SKID PIPING, PIPING VLV`); only large gutters (adaptive per-row threshold) start new columns. This is what keeps multi-word cells intact.
-4. Column centers are inferred **per block** by interval overlap, then duplicate/contained intervals (header remnants, text splinters) are fused back into their logical column. A column that only appears in data rows (e.g. UM values with no text header) still gets its own column.
-5. Wrapped lines (single-fragment rows overlapping the cell above) fold into the row above; consecutive multi-cell rows form table blocks, split by large vertical gaps, sustained column-structure changes, or header-row boundaries. Each block is scored (fill rate, row-shape consistency, multi-column density, header-likeness, size) → confidence label.
-6. Letterhead/address fragments are excluded by a dominance filter (weak + small next to a strong main table) and a header tie-break — verified: a 32-page packing note yields zero letterhead rows.
-7. `table-cleaner.js` trims/collapses whitespace while preserving numbers, currencies, signs, and leading-zero IDs.
-
-## How OCR fallback works
-
-- A page needs OCR when it yields fewer than `MIN_TEXT_ITEMS_BEFORE_OCR` fragments or less than `MIN_TEXT_CHARS_BEFORE_OCR` characters — or when the user clicks **Try OCR on all pages**.
-- The page is rendered at `OCR_SCALE: 2` to a reused canvas, recognized by a shared Tesseract worker (progress streamed to the UI), then the canvas is released.
-- Words below `MIN_OCR_CONFIDENCE` are dropped; the rest become the same normalized items and flow through the identical row/column/table pipeline. The banner *"Scanned document detected. OCR processing may take longer."* appears.
-
-## How table detection works (tuning)
-
-All knobs live in `js/config.js`:
-
-```js
-ROW_Y_TOLERANCE: 4, COLUMN_X_TOLERANCE: 12,
-MIN_TABLE_ROWS: 2, MIN_TABLE_COLUMNS: 2,
-TABLE_GAP_MULTIPLIER: 2.2, MIN_OCR_CONFIDENCE: 40, …
+```sh
+python3 -m http.server 8080 --bind 127.0.0.1
 ```
 
-Set `DEBUG: true` to log text items and OCR words to the console while tuning.
+Open http://127.0.0.1:8080. Vendor libraries and OCR models require internet access; there is no guaranteed offline cache.
 
-## Data-integrity rules (production)
+## Conversion and preservation
 
-1. **Values are never moved across columns.** Merges and stacking align by header label; leftovers extend the sheet visibly instead of squeezing into wrong slots.
-2. **Values are never deleted or glued into neighbors.** Sparse columns survive with their values in place (an unnamed column is honest; a shifted column is corruption).
-3. **Row order is sacred.** The sheet reads top-to-bottom exactly like the PDF (page order, then top-to-bottom within each page) — verified by tests.
-4. **Headers are majority-voted.** A one-page text-layer glitch (e.g. `I-JM` for `UM`) can never rename a column the rest of the document agrees on.
+- PDF text and OCR boxes use the same top-left coordinates in PDF points, including viewport rotation and crop offsets.
+- Rows are grouped by vertical position; words form cells using physical gaps. Repeated body spans establish columns before centred or spanning headings.
+- Headings stay exactly as extracted. Plausible heading rows receive yellow fill and bold text. Blank/unknown headings are retained, not guessed.
+- Every page and section stays in source order, including repeated headings, sparse rows, small tables, prose and footers. Uncertain non-table text is retained visibly rather than silently discarded.
+- Matching physical templates can contribute an empty column missing on another page. Values remain in left-to-right order; there is no header-label union, majority-vote renaming, or regrouping of distant tables.
+- Sparse and wrapped physical lines remain separate rows for review. The editor can correct them explicitly.
+- OCR runs automatically only when a page has no usable text. Low-confidence recognized words are retained and flagged. **Re-extract with OCR** explicitly retries all pages and replaces the current extraction and edits.
 
-## How Excel generation works
+## Verification and limits
 
-- One workbook, **one worksheet** (`combineTables` merges every page/table into a single grid).
-- Tables that continue across pages (same shape + repeated header) merge seamlessly — one 32-page packing note becomes one ~800-row sheet with a single header.
-- Tables with the **exact same heading repeating anywhere** in the document (`mergeSameHeaderTables`, even non-consecutive pages) also merge: one heading at the top, all data below.
-- Sheet styling: heading row(s) are **bold on a yellow background**, and **every cell gets thin black borders on all four sides**. (Plain SheetJS community cannot write styles — they are silently dropped — so the app uses the API-compatible `xlsx-js-style` fork as its writer.)
-- Sections with genuinely different widths are stacked below with a blank separator, **columns aligned by header label** (QTY stays under QTY even when a middle column like UM is absent on some pages); missing header labels are adopted from later pages.
-- Sheet name = input file name (`SIEMENS ENERGY 993 A2.pdf` → sheet `SIEMENS ENERGY 993 A2`, sanitized to Excel's 31-char / no-`[]:*?/\` rules).
-- `toCellValue()` converts only unambiguous plain numbers (and simple `$`-prefixed amounts) to numeric cells; leading-zero IDs (`001245`), codes, percents-as-text, and dates stay text so values never silently change.
-- Column widths auto-size (`longest + 2`, clamped 10–50), header row frozen (`A2`, best-effort).
-- Filename mirrors input: `bank-statement.pdf` → `bank-statement.xlsx`. Export always uses the **edited** preview data.
+The pipeline compares token multiplicities from all extracted fragments against the reconstructed grid. Missing or duplicated tokens stop conversion instead of producing a silently incomplete workbook. The result lists uncertain rows, OCR use, and pages with no recovered text. These checks describe the initial extraction; deliberate edits are exported as entered.
 
-## Run locally
+**This is a preservation check, not proof of PDF accuracy.** PDF files do not reliably encode table structure. An existing text layer may omit visible text or contain incorrect OCR; recognition may also misread scans. Values spanning columns, missing labels, merged cells, mixed layouts and wrapped rows need source review. Blank pages and unreadable pages cannot always be distinguished automatically. No general PDF converter can guarantee zero errors.
 
-Static site — no build, no server code. Serve the folder (ES modules require `http(s)`, not `file://`):
+The included Siemens PDFs demonstrate this distinction: they contain embedded text layers even though they look scanned, and some visible UM labels/values are absent from those layers. Use the OCR retry and compare the result with the PDF; missing text is never invented automatically.
 
-```bash
-npx serve .
-# or
-python3 -m http.server 8080
-# or VS Code Live Server
+## Spreadsheet editor
+
+Click **Edit spreadsheet** to open a full-width modal:
+
+- Column letters, row numbers, sticky headers, wrapping/resizable cells and a larger cell-value field.
+- Edit any cell; Tab/Enter navigation; Shift+Enter for a line break; paste tab-separated rectangular data.
+- Insert/delete the selected row or column, mark/unmark heading rows, undo/redo (30 changes).
+- Pages of 100 spreadsheet rows, direct row navigation, and Next issue.
+- Compare with PDF: directly rendered source pages, automatic source-page selection, manual PDF page navigation, and an original-file link.
+- Edits immediately update the exact grid used by download. Done or Escape closes the modal and keeps edits. Undo reverses edits; there is no separate draft.
+
+## Excel output
+
+One workbook and one worksheet, in document order. All cell values export as literal strings so currencies, locale-specific decimals, trailing zeros, long identifiers, dates, and formula-like text stay unchanged. Numbers can be explicitly converted in Excel later. All cells have thin borders and chosen heading rows are bold/yellow. Edited line breaks are retained. The workbook filename follows the source filename.
+
+## Validation
+
+```sh
+npm test
 ```
 
-Then open the printed URL. First load fetches CDN libraries + OCR language data (internet required); afterwards text-PDF conversion works offline from cache.
+The dependency-free Node tests cover heading and missing-cell alignment, duplicate labels, financial values, right-aligned numbers, multiline headings, small tables, multi-page order, prose fallback, blank pages, retained low-confidence OCR, crop coordinates, corrupt/password-protected errors, and missing/duplicate token detection.
 
-## Browser requirements
+Additional development checks ran the pinned PDF.js build against both included documents (60 pages, 22,678 source fragments), with zero token loss or duplication. Browser checks cover conversion, editing, undo/redo, row/column insertion, pagination, PDF comparison, modal close/reopen, mobile layout and a downloaded XLSX round trip. This does not certify every source value or constitute an OCR accuracy benchmark.
 
-Current Chrome, Edge, Firefox, Safari. Needs ES modules, `async/await`, Canvas, and enough memory for OCR at scale 2. Very large scanned PDFs process page-by-page with canvas/worker cleanup, but dozens of OCR pages will still be slow — that is inherent to on-device OCR.
+## Modules
 
-## Known limitations
+- `pdf-parser.js`: loading, normalized coordinates, rendering and cleanup.
+- `ocr.js`: worker lifecycle and retained word boxes.
+- `table-detector.js`: physical rows, columns, sections and source-order combination.
+- `validation.js`: extracted-token preservation checks.
+- `table-cleaner.js`: whitespace normalization.
+- `editor.js`: spreadsheet modal and PDF comparison.
+- `ui.js`: read-only result preview and status.
+- `excel-exporter.js`: exact text values and workbook styling.
+- `app.js`: orchestration, file intake, progress, cancellation and export.
 
-- PDFs have no real table structure — detection is heuristic and never 100%. Low-confidence output is preserved (not discarded) for manual correction.
-- Merged/spanning header cells are approximated, not perfectly reconstructed.
-- Community SheetJS has no rich cell styling; formatting is widths + frozen header only.
-- Password-protected PDFs are rejected with a friendly message (no bypass).
-- `file://` direct-open fails for ES modules — use a local server.
-
-## Privacy model
-
-- Files are read via `File.arrayBuffer()` and never `fetch`/`POST` anywhere.
-- PDFs live only in memory; closing the tab discards everything.
-- Only third-party contact is CDN fetches for libraries/OCR models.
-
-## Project structure
-
-```
-├── index.html
-├── css/styles.css
-├── js/
-│   ├── app.js            # orchestration + state + pipeline
-│   ├── config.js         # all tuning constants
-│   ├── pdf-parser.js     # PDF.js loading / text positions / canvas render
-│   ├── table-detector.js # rows, columns, scoring, merging, fallback
-│   ├── ocr.js            # Tesseract worker + word→item conversion
-│   ├── table-cleaner.js  # whitespace-safe value cleaning
-│   ├── excel-exporter.js # SheetJS workbook + download
-│   └── ui.js             # DOM rendering, tabs, editable preview
-├── README.md
-├── AGENT.md
-└── idea.md
-```
+All extracted text is rendered through `textContent` or form values. No backend, upload, persistent storage or framework is used.
