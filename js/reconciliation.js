@@ -7,6 +7,7 @@ const comparable = text => text.normalize('NFC').replace(/\s+/g, '');
 
 function overlaps(a, b) {
   if (a.page !== b.page) return false;
+  if (Math.abs(a.y + a.height / 2 - b.y - b.height / 2) > Math.min(a.height, b.height) * CONFIG.VERIFY_CENTER_TOLERANCE) return false;
   const x = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x);
   const y = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y);
   return x > 0 && y > 0 &&
@@ -50,13 +51,14 @@ export function reconcileReadings(pdfItems, firstPass, secondPass) {
     } else {
       selected = passes[1].length ? 1 : 2;
       status = consensus ? 'agreement' : 'unresolved';
+      if (!consensus && pdfItems.length) selected = null;
     }
     const all = passes.flat();
     const region = { id: `p${all[0].page}-r${regions.length + 1}`, page: all[0].page,
       x: Math.min(...all.map(i => i.x)), y: Math.min(...all.map(i => i.y)),
       status, texts, confidence, selected, itemCounts: passes.map(p => p.length) };
     regions.push(region);
-    for (const item of passes[selected]) items.push({ ...item, verification: status, regionId: region.id });
+    for (const item of (passes[selected] || [])) items.push({ ...item, verification: status, regionId: region.id });
   }
   return { items: ordered(items), regions,
     counts: Object.fromEntries(['agreement', 'recovered', 'corrected', 'unresolved'].map(s => [s, regions.filter(r => r.status === s).length])),

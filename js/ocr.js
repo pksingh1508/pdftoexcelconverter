@@ -34,13 +34,15 @@ class OcrEngine {
     const Tesseract = getTesseract();
     this._initializing = (async () => {
       // Tesseract v5 API: createWorker('eng', OEM, { logger })
-      this.worker = await Tesseract.createWorker('eng', 1, {
+      const worker = await Tesseract.createWorker('eng', 1, {
         logger: (m) => {
           if (this.onLog && m && (m.status === 'recognizing text' || m.status === 'loading')) {
             this.onLog(m);
           }
         },
       });
+      if (this.terminated) { await worker.terminate(); throw new Error('OCR cancelled.'); }
+      this.worker = worker;
       // PSM 6 (uniform block of text): materially better for full-page
       // tables than the default fully-automatic segmentation.
       try {
@@ -70,8 +72,8 @@ class OcrEngine {
   }
 
   async terminate() {
+    this.terminated = true;
     try {
-      if (this._initializing) await this._initializing;
       if (this.worker && this.worker.terminate) await this.worker.terminate();
     } catch {
       /* ignore */
@@ -92,8 +94,9 @@ export function getOcrEngine() {
 
 export async function terminateOcrEngine() {
   if (sharedEngine) {
-    await sharedEngine.terminate();
+    const engine = sharedEngine;
     sharedEngine = null;
+    await engine.terminate();
   }
 }
 

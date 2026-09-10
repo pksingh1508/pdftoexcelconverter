@@ -1,3 +1,4 @@
+import { removeTableLines } from './ocr-preprocess.js';
 import { CONFIG } from './config.js';
 import { renderPageToCanvas, releaseCanvas } from './pdf-parser.js';
 import { ocrCanvas } from './ocr.js';
@@ -8,6 +9,15 @@ export function throwIfCancelled(isCancelled) {
 }
 
 /** Two sequential visual readings; only one page canvas is held at a time. */
+export function cancellable(promise, isCancelled) {
+  return new Promise((resolve, reject) => {
+    const timer = setInterval(() => {
+      if (isCancelled()) { clearInterval(timer); reject(Object.assign(new Error('Conversion cancelled.'), { code: 'CANCELLED' })); }
+    }, CONFIG.OCR_CANCEL_POLL_MS);
+    promise.then(value => { clearInterval(timer); resolve(value); }, error => { clearInterval(timer); reject(error); });
+  });
+}
+
 export async function verifyPage(pdf, page, pdfItems, { onProgress = () => {}, isCancelled = () => false } = {}) {
   const readings = [], failures = [];
   for (const [index, options] of CONFIG.VERIFY_PASSES.entries()) {
@@ -17,9 +27,10 @@ export async function verifyPage(pdf, page, pdfItems, { onProgress = () => {}, i
       onProgress(`Visual check ${index + 1} of ${CONFIG.VERIFY_PASSES.length}`);
       await renderPageToCanvas(pdf, page, canvas, options.scale);
       throwIfCancelled(isCancelled);
-      readings.push(await ocrCanvas(canvas, page, m => {
+      if (options.removeLines) removeTableLines(canvas, options.scale);
+      readings.push(await cancellable(ocrCanvas(canvas, page, m => {
         if (m.status === 'recognizing text') onProgress(`Visual check ${index + 1}: ${Math.round(m.progress * 100)}%`);
-      }, options));
+      }, options), isCancelled));
     } catch (error) {
       throwIfCancelled(isCancelled);
       failures.push({ pass: index + 1, message: error.message });

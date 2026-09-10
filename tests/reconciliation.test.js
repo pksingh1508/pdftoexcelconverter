@@ -64,3 +64,27 @@ test('region evidence attaches to only the closest source row, not each precedin
  attachVerificationIssues(tables,{regions:[{id:'x',y:100,status:'recovered',texts:['','B','B']}]});
  assert.equal(tables[0].issues.length,0);assert.equal(tables[1].issues.length,1);
 });
+
+test('unconfirmed OCR-only additions remain in evidence rather than polluting a text page',()=>{
+ const r=reconcileReadings([pdf('Item')],[word('Item'),word('|',100,0,'ocr',10)],[]);
+ assert.deepEqual(r.items.map(i=>i.text),['Item']);
+ assert.ok(r.regions.some(g=>g.texts[1]==='|' && g.selected===null));
+});
+test('a tall OCR artifact cannot bridge separate physical rows',()=>{
+ const r=reconcileReadings([pdf('A',0,0),pdf('B',0,30)],[word('artifact',0,0,'ocr',0,30)].map(i=>({...i,height:100})),[]);
+ assert.ok(!r.regions.some(g=>g.texts[0]==='A B'));
+});
+test('cancellation interrupts an unresponsive OCR promise',async()=>{
+ const {cancellable}=await import('../js/page-verifier.js');
+ await assert.rejects(cancellable(new Promise(()=>{}),()=>true),{code:'CANCELLED'});
+});
+test('line preprocessing removes long borders while retaining isolated glyph strokes',async()=>{
+ const {removeTableLines}=await import('../js/ocr-preprocess.js');
+ const width=100,height=30,data=new Uint8ClampedArray(width*height*4).fill(255);
+ const black=(x,y)=>{for(let k=0;k<3;k++)data[(y*width+x)*4+k]=0;};
+ for(let x=0;x<100;x++)black(x,5);
+ for(let y=15;y<22;y++)black(10,y);
+ const ctx={getImageData:()=>({width,height,data}),putImageData(){}};
+ removeTableLines({width,height,getContext:()=>ctx},1);
+ assert.equal(data[(5*width+50)*4],255);assert.equal(data[(18*width+10)*4],0);
+});
