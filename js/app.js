@@ -347,8 +347,7 @@ async function convert(forceOcr) {
 
     state.tables = tables;
     state.ocrUsed = ocrUsed;
-    // Merge continuations, then combine EVERYTHING into one dataset:
-    // a single preview grid and a single-sheet Excel download.
+    // Preserve page/section order in a single preview and worksheet.
     state.combined = combineTables(tables);
     state.audit = auditExtraction(allItems, state.combined, pageCount);
     if (!state.audit.passed) throw new Error('Integrity check failed: extracted text was lost or duplicated during reconstruction.');
@@ -471,9 +470,7 @@ function toggleRawText() {
 }
 
 /**
- * Render the single combined preview grid (all pages/tables merged).
- * Edits write straight into state.combined.rows — exactly what gets
- * exported, so the preview is always what-you-see-is-what-you-download.
+ * Render the read-only preview of the shared grid edited by the modal.
  */
 function renderCombined() {
   const c = state.combined;
